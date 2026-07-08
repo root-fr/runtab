@@ -31,9 +31,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - name: Install libdbus (keyring backend)
-        if: startsWith(matrix.target, 'runtab-linux')
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Build dashboard UI
         run: npm ci && npm run build
         working-directory: ui
@@ -82,10 +79,20 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        # Platform packages first: the main package's optionalDependencies must
-        # resolve by the time it is published.
+        # Platform packages before the main package: the main package's
+        # optionalDependencies must resolve at publish time (glob expands
+        # `runtab-*` first, then the literal `runtab`). Each publish is guarded
+        # by an already-published check so a re-run after a partial publish
+        # skips what landed instead of dying on E403. A `-` in the version
+        # (prerelease) publishes under the `next` dist-tag, never `latest`.
         run: |
-          for dir in npm/dist/runtab-*; do
-            npm publish --provenance --access public "$dir"
+          v="${GITHUB_REF_NAME#v}"
+          case "$v" in *-*) tag=next ;; *) tag=latest ;; esac
+          for dir in npm/dist/runtab-* npm/dist/runtab; do
+            name="$(basename "$dir")"
+            if npm view "$name@$v" version >/dev/null 2>&1; then
+              echo "skip $name@$v (already published)"
+              continue
+            fi
+            npm publish --provenance --access public --tag "$tag" "$dir"
           done
-          npm publish --provenance --access public npm/dist/runtab

@@ -1,6 +1,6 @@
 [package]
 name = "runtab"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 description = "Local-first ledger that turns AI coding-agent logs into a private SQLite token/cost ledger"
 license.workspace = true
@@ -26,7 +26,11 @@ axum = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 sha2 = "0.10"
 getrandom = "0.2"
-keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+# Pure-Rust secret-service backend (zbus, not the C libdbus) so the Linux
+# binary has no libdbus-1.so load-time dependency and runs on minimal systems
+# (containers, slim images). Native keychains on macOS/Windows. Entry access
+# stays synchronous; async-io only drives zbus internally.
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 rust-embed = { version = "8", optional = true }
 
 [dev-dependencies]
