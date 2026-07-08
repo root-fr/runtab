@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-07-05T12:00:00.000Z","sessionId":"s1","requestId":"r1","uuid":"u1","cwd":"/home/u/projA","version":"1.0.0","costUSD":0.25,"message":{"id":"m1","model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":50}}}
+{"type":"assistant","timestamp":"2026-07-05T12:05:00.000Z","sessionId":"s1","requestId":"r2","uuid":"u2","cwd":"/home/u/projA","version":"1.0.0","costUSD":0.10,"message":{"id":"m2","model":"claude-opus-4-8","usage":{"input_tokens":40,"output_tokens":20}}}

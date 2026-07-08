@@ -1,0 +1,1 @@
+{"type":"assistant","timestamp":"2026-07-05T12:00:00.000Z","sessionId":"s9","requestId":"r90","uuid":"u90","cwd":"/home/u/projE","version":"1.9.0","message":{"id":"m90","model":"mystery-model-1","usage":{"input_tokens":100,"output_tokens":40,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}

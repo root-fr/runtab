@@ -1,0 +1,6 @@
+{"sessionId":"s","requestId":"r","version":"1.0.0","message":{"id":"m","model":"claude-opus-4-8","usage":{"input_tokens":1,}}}
+{"type":"assistant","timestamp":"2026-07-04T00:00:00.000Z","sessionId":"","requestId":"rq1","version":"1.0.0","cwd":"/home/u/projD","message":{"id":"mq1","model":"claude-opus-4-8","usage":{"input_tokens":5,"output_tokens":5}}}
+{"type":"assistant","timestamp":"2026-07-04T00:00:01.000Z","sessionId":"sq2","requestId":"rq2","version":"beta","cwd":"/home/u/projD","message":{"id":"mq2","model":"claude-opus-4-8","usage":{"input_tokens":5,"output_tokens":5}}}
+{"type":"assistant","timestamp":"2026-07-04T00:00:02.000Z","sessionId":"sq3","requestId":"rq3","version":"1.0.0","cwd":"/home/u/projD","message":{"id":"","model":"claude-opus-4-8","usage":{"input_tokens":5,"output_tokens":5}}}
+{"type":"assistant","timestamp":"2026-07-04T00:00:03.000Z","sessionId":"sq4","requestId":"rq4","uuid":"uq4","version":"1.0.0","cwd":"/home/u/projD","message":{"id":"mq4","model":"claude-opus-4-8","usage":{"input_tokens":40,"output_tokens":15}}}
+{"type":"user","timestamp":"2026-07-04T00:00:04.000Z","sessionId":"sq4","cwd":"/home/u/projD","message":{"role":"user","content":"thanks"}}

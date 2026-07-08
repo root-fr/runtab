@@ -1,0 +1,37 @@
+[package]
+name = "runtab"
+version = "0.1.0"
+edition.workspace = true
+description = "Local-first ledger that turns AI coding-agent logs into a private SQLite token/cost ledger"
+license.workspace = true
+
+authors = ["Matthieu MALVACHE <matthieu@root.fr>"]
+homepage = "https://root.cloud"
+repository = "https://github.com/root-fr/runtab"
+readme = "README.md"
+
+[features]
+# Embeds ui/dist into the binary. Off by default so `cargo test`/`cargo build`
+# work without a built SPA present; release binaries enable it after `npm run build`.
+embed-ui = ["dep:rust-embed"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+axum = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sha2 = "0.10"
+getrandom = "0.2"
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+rust-embed = { version = "8", optional = true }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json = "1"

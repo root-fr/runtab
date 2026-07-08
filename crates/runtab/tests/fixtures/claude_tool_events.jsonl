@@ -1,0 +1,4 @@
+{"type":"assistant","timestamp":"2026-07-05T10:00:00.000Z","sessionId":"st1","requestId":"rt1","uuid":"ut1","cwd":"/home/u/projT","version":"1.9.0","message":{"id":"mt1","model":"claude-sonnet-4-5-20250929","usage":{"input_tokens":120,"output_tokens":40,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"content":[{"type":"tool_use","id":"toolu_100","name":"Bash","input":{"command":"git status"}}]}}
+{"type":"user","timestamp":"2026-07-05T10:00:01.000Z","sessionId":"st1","cwd":"/home/u/projT","message":{"role":"user","content":"go ahead"}}
+{"type":"user","timestamp":"2026-07-05T10:00:02.000Z","sessionId":"st1","cwd":"/home/u/projT","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_100","content":"On branch main"}]}}
+{"type":"assistant","timestamp":"2026-07-05T10:00:03.000Z","sessionId":"st1","cwd":"/home/u/projT","message":{"content":[{"type":"tool_use","id":"toolu_101","name":"Read","input":{"file":"README.md"}}]}}
