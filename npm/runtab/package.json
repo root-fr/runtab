@@ -1,0 +1,36 @@
+{
+  "name": "runtab",
+  "version": "0.0.0-dev",
+  "description": "Local-first token and cost ledger for AI coding agents (Claude Code, Codex, and others)",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "ai",
+    "tokens",
+    "cost",
+    "usage",
+    "cli"
+  ],
+  "homepage": "https://root.cloud",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/root-fr/runtab.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "runtab": "bin/runtab.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "runtab-linux-x64": "0.0.0-dev",
+    "runtab-linux-arm64": "0.0.0-dev",
+    "runtab-darwin-x64": "0.0.0-dev",
+    "runtab-darwin-arm64": "0.0.0-dev",
+    "runtab-win32-x64": "0.0.0-dev"
+  }
+}

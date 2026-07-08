@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-/// Sync server base URL: `RUNTAB_SERVER_URL` if set, else the docker default.
+/// Sync server base URL: `RUNTAB_SERVER_URL` if set, else the hosted service.
 pub fn server_url() -> String {
     std::env::var("RUNTAB_SERVER_URL")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "http://127.0.0.1:7824".to_string())
+        .unwrap_or_else(|| "https://api.runtab.ai".to_string())
 }
 
 /// The runtab data directory (`$XDG_DATA_HOME/runtab` or `~/.local/share/runtab`),

@@ -7,7 +7,20 @@ dashboard. Nothing leaves your machine unless you opt in to sync.
 
 ## Install
 
-Build from source with Cargo:
+Run without installing (prebuilt binaries for Linux x64/arm64, macOS
+x64/arm64, Windows x64):
+
+```
+npx runtab daily
+```
+
+Or install globally:
+
+```
+npm install -g runtab
+```
+
+Or build from source with Cargo:
 
 ```
 cargo build --release -p runtab
@@ -71,8 +84,9 @@ runtab sync auto status       # show whether auto-sync is installed
 ```
 
 The sync server endpoint is configurable via the `RUNTAB_SERVER_URL`
-environment variable. It defaults to `http://127.0.0.1:7824` (localhost) if
-unset. Point it at any compatible sync server you run yourself.
+environment variable. It defaults to the hosted service at
+`https://api.runtab.ai`. To self-host, point it at any compatible sync
+server you run yourself.
 
 ## License
 
