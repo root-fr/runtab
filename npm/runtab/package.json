@@ -29,7 +29,6 @@
   "optionalDependencies": {
     "runtab-linux-x64": "0.0.0-dev",
     "runtab-linux-arm64": "0.0.0-dev",
-    "runtab-darwin-x64": "0.0.0-dev",
     "runtab-darwin-arm64": "0.0.0-dev",
     "runtab-win32-x64": "0.0.0-dev"
   }

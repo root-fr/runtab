@@ -20,7 +20,7 @@ npx runtab serve     # run the local dashboard (embedded SPA + local JSON API)
 Add `--json` to any reporting subcommand for machine-readable output.
 
 This package installs a prebuilt binary via a platform-specific
-optionalDependency (Linux x64/arm64, macOS x64/arm64, Windows x64). On other
+optionalDependency (Linux x64/arm64, macOS arm64, Windows x64). On other
 platforms, build from source with Cargo.
 
 Source, docs, and issues: <https://github.com/root-fr/runtab>

@@ -8,7 +8,7 @@ dashboard. Nothing leaves your machine unless you opt in to sync.
 ## Install
 
 Run without installing (prebuilt binaries for Linux x64/arm64, macOS
-x64/arm64, Windows x64):
+arm64, Windows x64):
 
 ```
 npx runtab daily

@@ -21,18 +21,16 @@ jobs:
             runner: ubuntu-22.04
           - target: runtab-linux-arm64
             runner: ubuntu-22.04-arm
-          - target: runtab-darwin-x64
-            runner: macos-13
           - target: runtab-darwin-arm64
             runner: macos-14
           - target: runtab-win32-x64
             runner: windows-2022
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
       - name: Install libdbus (keyring backend)
         if: startsWith(matrix.target, 'runtab-linux')
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
@@ -53,7 +51,7 @@ jobs:
           else
             cp target/release/runtab "artifact/${{ matrix.target }}/"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.target }}
           path: artifact/${{ matrix.target }}
@@ -63,10 +61,10 @@ jobs:
     needs: build
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
       - name: Check tag matches crate version
         run: |
@@ -76,7 +74,7 @@ jobs:
             echo "tag v$TAG_VERSION does not match crate version $CRATE_VERSION" >&2
             exit 1
           fi
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: artifacts
       - name: Assemble npm packages

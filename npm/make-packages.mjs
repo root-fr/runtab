@@ -15,7 +15,6 @@ const NPM_DIR = dirname(fileURLToPath(import.meta.url));
 const PLATFORMS = [
   { pkg: "runtab-linux-x64", os: "linux", cpu: "x64" },
   { pkg: "runtab-linux-arm64", os: "linux", cpu: "arm64" },
-  { pkg: "runtab-darwin-x64", os: "darwin", cpu: "x64" },
   { pkg: "runtab-darwin-arm64", os: "darwin", cpu: "arm64" },
   { pkg: "runtab-win32-x64", os: "win32", cpu: "x64" },
 ];

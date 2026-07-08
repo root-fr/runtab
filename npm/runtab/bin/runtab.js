@@ -6,7 +6,6 @@ const { spawnSync } = require("child_process");
 const PACKAGES = {
   "linux x64": "runtab-linux-x64",
   "linux arm64": "runtab-linux-arm64",
-  "darwin x64": "runtab-darwin-x64",
   "darwin arm64": "runtab-darwin-arm64",
   "win32 x64": "runtab-win32-x64",
 };
