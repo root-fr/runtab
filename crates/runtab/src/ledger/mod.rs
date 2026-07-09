@@ -24,7 +24,7 @@ pub use api_sessions::{PlanUsage, PlanWindows, SessionPage, SessionRow, Window};
 pub use identity::{basename, clamp_chars};
 pub use project_prefs::ReviewItem;
 pub use push_rows::PendingBatch;
-pub use query::AggregateRow;
+pub use query::{AggregateRow, Totals};
 pub use savings_query::{SavingsDaily, SavingsReport, SavingsWindow};
 pub use sync_store::{MachineStat, Settings, SyncState};
 pub use tool_query::{RtkTotals, ToolAggregateRow};

@@ -179,8 +179,48 @@ fn scan_recovers_line_completed_after_a_prior_scan() {
     scan_file(&ledger, &adapter, &pricing, f.path(), &mut second);
     assert_eq!(second.events_inserted, 1);
 
-    let total: i64 = ledger.models().unwrap().iter().map(|r| r.events).sum();
+    let total: i64 = ledger.models(None).unwrap().iter().map(|r| r.events).sum();
     assert_eq!(total, 2, "both mF and mG must be in the ledger");
+}
+
+/// Hermetic adapter: fixed discovery list, real Claude Code parsing.
+struct FixedPathsAdapter {
+    paths: Vec<PathBuf>,
+    inner: ClaudeCodeAdapter,
+}
+
+impl Adapter for FixedPathsAdapter {
+    fn discover(&self) -> Vec<PathBuf> {
+        self.paths.clone()
+    }
+
+    fn parse_from(&self, path: &Path, byte_offset: u64) -> std::io::Result<runtab::adapters::ParseOutput> {
+        self.inner.parse_from(path, byte_offset)
+    }
+}
+
+#[test]
+fn scan_with_progress_reports_counts_per_file_ending_at_total() {
+    let ledger = Ledger::open_in_memory().unwrap();
+    let pricing = Pricing::load().unwrap();
+    let f1 = TempTranscript::new();
+    let f2 = TempTranscript::new();
+    f1.write(format!("{}\n", line("mP1", "rP1", 10)).as_bytes());
+    f2.write(format!("{}\n", line("mP2", "rP2", 20)).as_bytes());
+
+    let adapters: Vec<Box<dyn Adapter>> = vec![Box::new(FixedPathsAdapter {
+        paths: vec![f1.path().to_path_buf(), f2.path().to_path_buf()],
+        inner: ClaudeCodeAdapter::new(),
+    })];
+
+    let mut calls: Vec<(u64, u64)> = Vec::new();
+    let summary = runtab::scan_with_progress(&ledger, &adapters, &pricing, &mut |done, total| {
+        calls.push((done, total));
+    });
+
+    assert_eq!(summary.files_scanned, 2);
+    assert_eq!(summary.events_inserted, 2);
+    assert_eq!(calls, vec![(1, 2), (2, 2)]);
 }
 
 #[test]
@@ -203,6 +243,6 @@ fn rewritten_shorter_file_is_reingested_from_the_start() {
     // The rewrite is detected (file shrank), so mB is read rather than the
     // scan resuming past the shorter content and losing it.
     assert_eq!(second.events_inserted, 1);
-    let events: i64 = ledger.models().unwrap().iter().map(|r| r.events).sum();
+    let events: i64 = ledger.models(None).unwrap().iter().map(|r| r.events).sum();
     assert_eq!(events, 2, "mB must be ingested after the rewrite");
 }

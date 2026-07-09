@@ -1,6 +1,6 @@
 [package]
 name = "runtab"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 description = "Local-first ledger that turns AI coding-agent logs into a private SQLite token/cost ledger"
 license.workspace = true

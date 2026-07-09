@@ -119,7 +119,7 @@ impl Ledger {
         )
     }
 
-    /// Cheap backlog signal surfaced in `print_scan_summary`: `tool_use`
+    /// Cheap backlog signal surfaced in `render_scan_summary`: `tool_use`
     /// blocks still waiting on a result. A growing count across scans usually
     /// means interrupted sessions or a stuck adapter, since rows are normally
     /// consumed within the same or next scan.

@@ -22,6 +22,8 @@ use crate::ledger::Ledger;
 use crate::pricing::Pricing;
 use token::TokenStore;
 
+type SyncRoundTrip = anyhow::Result<(Ledger, Result<(PushOutcome, PullOutcome), SyncError>)>;
+
 pub enum Cmd {
     Login,
     Status,
@@ -127,11 +129,7 @@ fn now(ledger: Ledger) -> anyhow::Result<()> {
 /// a `Mutex` for the async tasks and handed back once they're done). Each
 /// caller keeps its own precondition policy and applies the result with
 /// `apply_sync_outcome`.
-fn push_pull_once(
-    ledger: Ledger,
-    server_url: Option<&str>,
-    token: &str,
-) -> anyhow::Result<(Ledger, Result<(PushOutcome, PullOutcome), SyncError>)> {
+fn push_pull_once(ledger: Ledger, server_url: Option<&str>, token: &str) -> SyncRoundTrip {
     let server = server_url.map(str::to_string).unwrap_or_else(config::server_url);
     let machine_id = ledger.machine_id().to_string();
     let client = SyncClient::new(&server)?;

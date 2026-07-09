@@ -2,8 +2,10 @@ pub mod adapters;
 pub mod billing;
 pub mod cmdnorm;
 pub mod encoding;
+pub mod format;
 pub mod ledger;
 pub mod model;
+pub mod overview;
 pub mod pricing;
 pub mod report;
 pub mod rtkimport;
@@ -70,15 +72,25 @@ pub struct RtkReport {
 /// considered abandoned (interrupted session, rotated transcript).
 const PENDING_TOOL_CALL_MAX_AGE_SECS: i64 = 30 * 86_400;
 
-/// Idempotent scan across all adapters. Re-scanning is always safe: the
-/// per-file byte offset skips already-read bytes and the dedup key drops
-/// replays.
-pub fn scan(ledger: &Ledger, adapters: &[Box<dyn Adapter>], pricing: &Pricing) -> ScanSummary {
-    let mut summary = ScanSummary::default();
-    for adapter in adapters {
+/// `scan` with a progress callback: `(files_done, files_total)` after each
+/// file. Discovery runs up front so the total is known before work starts.
+pub fn scan_with_progress(
+    ledger: &Ledger,
+    adapters: &[Box<dyn Adapter>],
+    pricing: &Pricing,
+    progress: &mut dyn FnMut(u64, u64),
+) -> ScanSummary {
+    let mut work: Vec<(usize, PathBuf)> = Vec::new();
+    for (i, adapter) in adapters.iter().enumerate() {
         for path in adapter.discover() {
-            scan_file(ledger, adapter.as_ref(), pricing, &path, &mut summary);
+            work.push((i, path));
         }
+    }
+    let total = work.len() as u64;
+    let mut summary = ScanSummary::default();
+    for (done, (i, path)) in work.iter().enumerate() {
+        scan_file(ledger, adapters[*i].as_ref(), pricing, path, &mut summary);
+        progress(done as u64 + 1, total);
     }
     let cutoff = timeutil::epoch_to_rfc3339(timeutil::now_epoch() - PENDING_TOOL_CALL_MAX_AGE_SECS);
     if let Err(e) = ledger.prune_pending(&cutoff) {
@@ -89,6 +101,13 @@ pub fn scan(ledger: &Ledger, adapters: &[Box<dyn Adapter>], pricing: &Pricing) -
         Err(e) => eprintln!("runtab: cannot count pending tool calls: {e}"),
     }
     summary
+}
+
+/// Idempotent scan across all adapters. Re-scanning is always safe: the
+/// per-file byte offset skips already-read bytes and the dedup key drops
+/// replays.
+pub fn scan(ledger: &Ledger, adapters: &[Box<dyn Adapter>], pricing: &Pricing) -> ScanSummary {
+    scan_with_progress(ledger, adapters, pricing, &mut |_, _| {})
 }
 
 /// Runs the rtk import + attribution phase after the adapter scan (see

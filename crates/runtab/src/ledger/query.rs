@@ -23,6 +23,18 @@ pub struct AggregateRow {
     pub saved_tokens: Option<i64>,
 }
 
+/// Whole-ledger (or since-windowed) rollup for the overview and scan payoff.
+#[derive(Debug, Serialize)]
+pub struct Totals {
+    pub events: i64,
+    pub total_tokens: i64,
+    pub cost_usd: Option<f64>,
+    pub unpriced_events: i64,
+    pub sessions: i64,
+    /// Earliest `YYYY-MM-DD` with data in the window; `None` when empty.
+    pub first_day: Option<String>,
+}
+
 /// How `aggregate`'s `saved_tokens` column is derived, one per report: a
 /// scalar correlated subquery evaluated once per output group (not per
 /// underlying row — it must never be wrapped in an outer `SUM`, which would
@@ -34,44 +46,57 @@ enum SavedJoin {
 }
 
 impl SavedJoin {
-    fn sql_expr(&self) -> &'static str {
+    // `windowed` mirrors the outer query's `ts >= ?1` bound inside the
+    // correlated subquery, so a windowed report never pairs windowed token
+    // totals with all-time savings.
+    fn sql_expr(&self, windowed: bool) -> String {
+        let window = if windowed { " AND r.ts >= ?1" } else { "" };
         match self {
+            SavedJoin::None => "NULL".to_string(),
             // `project_path` alone, independent of attribution, so a
             // `match_kind = 'none'` row still counts toward its project.
-            SavedJoin::None => "NULL",
-            SavedJoin::Project => {
-                "(SELECT SUM(r.saved_tokens) FROM rtk_events r WHERE r.project_path = usage_events.project)"
-            }
+            SavedJoin::Project => format!(
+                "(SELECT SUM(r.saved_tokens) FROM rtk_events r WHERE r.project_path = usage_events.project{window})"
+            ),
             // Only attributed rows carry a `(source, session_id)`, so an
             // unmatched rtk row is naturally excluded here (NULL never
             // equals a real session id).
-            SavedJoin::Session => {
+            SavedJoin::Session => format!(
                 "(SELECT SUM(r.saved_tokens) FROM rtk_events r
-                    WHERE r.source = usage_events.source AND r.session_id = usage_events.session_id)"
-            }
+                    WHERE r.source = usage_events.source AND r.session_id = usage_events.session_id{window})"
+            ),
         }
     }
 }
 
 impl Ledger {
-    pub fn daily(&self) -> rusqlite::Result<Vec<AggregateRow>> {
-        self.aggregate("substr(ts, 1, 10)", "k ASC", SavedJoin::None)
+    pub fn daily(&self, since: Option<&str>) -> rusqlite::Result<Vec<AggregateRow>> {
+        self.aggregate("substr(ts, 1, 10)", "k ASC", SavedJoin::None, since)
     }
 
-    pub fn models(&self) -> rusqlite::Result<Vec<AggregateRow>> {
-        self.aggregate("model", "total_tokens DESC", SavedJoin::None)
+    pub fn models(&self, since: Option<&str>) -> rusqlite::Result<Vec<AggregateRow>> {
+        self.aggregate("model", "total_tokens DESC", SavedJoin::None, since)
     }
 
-    pub fn projects(&self) -> rusqlite::Result<Vec<AggregateRow>> {
-        self.aggregate("project", "total_tokens DESC", SavedJoin::Project)
+    pub fn projects(&self, since: Option<&str>) -> rusqlite::Result<Vec<AggregateRow>> {
+        self.aggregate("project", "total_tokens DESC", SavedJoin::Project, since)
     }
 
-    pub fn sessions(&self) -> rusqlite::Result<Vec<AggregateRow>> {
-        self.aggregate("session_id", "total_tokens DESC", SavedJoin::Session)
+    pub fn sessions(&self, since: Option<&str>) -> rusqlite::Result<Vec<AggregateRow>> {
+        self.aggregate("session_id", "total_tokens DESC", SavedJoin::Session, since)
     }
 
     // `group_expr` and `order` are fixed internal strings (never user input).
-    fn aggregate(&self, group_expr: &str, order: &str, saved_join: SavedJoin) -> rusqlite::Result<Vec<AggregateRow>> {
+    // `since` is a `YYYY-MM-DD` lower bound; RFC 3339 `ts` compares correctly
+    // against a bare date prefix.
+    fn aggregate(
+        &self,
+        group_expr: &str,
+        order: &str,
+        saved_join: SavedJoin,
+        since: Option<&str>,
+    ) -> rusqlite::Result<Vec<AggregateRow>> {
+        let filter = if since.is_some() { "WHERE ts >= ?1" } else { "" };
         let sql = format!(
             "SELECT {group_expr} AS k,
                     COUNT(*) AS events,
@@ -84,13 +109,14 @@ impl Ledger {
                     COALESCE(SUM(cost_usd IS NULL), 0),
                     {saved}
              FROM usage_events
+             {filter}
              GROUP BY k
              ORDER BY {order}",
             total = super::schema::TOTAL_TOKENS_EXPR,
-            saved = saved_join.sql_expr(),
+            saved = saved_join.sql_expr(since.is_some()),
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map([], |r| {
+        let map = |r: &rusqlite::Row| {
             Ok(AggregateRow {
                 key: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
                 events: r.get(1)?,
@@ -103,7 +129,39 @@ impl Ledger {
                 unpriced_events: r.get(8)?,
                 saved_tokens: r.get(9)?,
             })
-        })?;
-        rows.collect()
+        };
+        match since {
+            Some(s) => stmt.query_map([s], map)?.collect(),
+            None => stmt.query_map([], map)?.collect(),
+        }
+    }
+
+    pub fn totals(&self, since: Option<&str>) -> rusqlite::Result<Totals> {
+        let filter = if since.is_some() { "WHERE ts >= ?1" } else { "" };
+        let sql = format!(
+            "SELECT COUNT(*),
+                    COALESCE(SUM({total}), 0),
+                    SUM(cost_usd),
+                    COALESCE(SUM(cost_usd IS NULL), 0),
+                    COUNT(DISTINCT session_id),
+                    MIN(substr(ts, 1, 10))
+             FROM usage_events
+             {filter}",
+            total = super::schema::TOTAL_TOKENS_EXPR,
+        );
+        let map = |r: &rusqlite::Row| {
+            Ok(Totals {
+                events: r.get(0)?,
+                total_tokens: r.get(1)?,
+                cost_usd: r.get(2)?,
+                unpriced_events: r.get(3)?,
+                sessions: r.get(4)?,
+                first_day: r.get(5)?,
+            })
+        };
+        match since {
+            Some(s) => self.conn.query_row(&sql, [s], map),
+            None => self.conn.query_row(&sql, [], map),
+        }
     }
 }

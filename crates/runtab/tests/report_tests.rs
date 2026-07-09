@@ -95,20 +95,20 @@ fn sessions_projects_and_tools_report_rtk_savings_and_tool_totals() {
     assert_eq!((attribution.text, attribution.window, attribution.none), (1, 0, 1));
 
     // sessions(): only s1 carries the attributed savings.
-    let sessions = l.sessions().unwrap();
+    let sessions = l.sessions(None).unwrap();
     assert_eq!(sessions.iter().find(|r| r.key == "s1").unwrap().saved_tokens, Some(400));
     assert_eq!(sessions.iter().find(|r| r.key == "s2").unwrap().saved_tokens, None);
     assert_eq!(sessions.iter().find(|r| r.key == "s3").unwrap().saved_tokens, None);
 
     // projects(): projA gets the attributed row; projB gets the unattributed
     // one too, since project grouping is independent of attribution.
-    let projects = l.projects().unwrap();
+    let projects = l.projects(None).unwrap();
     assert_eq!(projects.iter().find(|r| r.key == "/home/u/projA").unwrap().saved_tokens, Some(400));
     assert_eq!(projects.iter().find(|r| r.key == "/home/u/projB").unwrap().saved_tokens, Some(40));
 
     // daily()/models() never carry a saved_tokens value.
-    assert!(l.daily().unwrap().iter().all(|r| r.saved_tokens.is_none()));
-    assert!(l.models().unwrap().iter().all(|r| r.saved_tokens.is_none()));
+    assert!(l.daily(None).unwrap().iter().all(|r| r.saved_tokens.is_none()));
+    assert!(l.models(None).unwrap().iter().all(|r| r.saved_tokens.is_none()));
 
     // tools(): exact calls/sums/share per tool_name.
     let tools = l.tool_aggregates(None, None).unwrap();
@@ -231,4 +231,54 @@ fn scan_summary_json_omits_rtk_key_when_absent_and_includes_it_when_present() {
     };
     let json = serde_json::to_string(&present).unwrap();
     assert!(json.contains("\"rtk\""), "json was: {json}");
+}
+
+#[test]
+fn windowed_reports_window_rtk_savings_alongside_tokens() {
+    let l = Ledger::open_in_memory().unwrap();
+
+    // One session, active before and inside the window.
+    insert(&l, &ev("m1", "s1", "/home/u/projA", "model-x", "2026-06-01T10:00:00Z", 100, Estimated, None));
+    insert(&l, &ev("m2", "s1", "/home/u/projA", "model-x", "2026-07-01T10:00:00Z", 100, Estimated, None));
+
+    // Bash runs on both sides of the window boundary, each matched by an rtk row.
+    l.insert_pending_tool_use(&bash_use("s1", "old_bash", "/home/u/projA", "git status", "2026-06-01T10:00:05Z"))
+        .unwrap();
+    assert!(l.resolve_tool_result(&result("s1", "old_bash", "2026-06-01T10:00:06Z", 10)).unwrap());
+    l.insert_pending_tool_use(&bash_use("s1", "new_bash", "/home/u/projA", "ls", "2026-07-01T10:00:05Z"))
+        .unwrap();
+    assert!(l.resolve_tool_result(&result("s1", "new_bash", "2026-07-01T10:00:06Z", 10)).unwrap());
+
+    let old_rtk = RtkCommandRow {
+        rtk_row_id: 1,
+        ts: "2026-06-01T10:00:06.500000000+00:00".to_string(),
+        project_path: "/home/u/projA".to_string(),
+        head_hash: cmdnorm::hash(&cmdnorm::head("git status")),
+        cmd_hash: cmdnorm::hash("git status"),
+        raw_tokens: 100,
+        filtered_tokens: 20,
+        saved_tokens: 80,
+        exec_time_ms: 5,
+    };
+    let new_rtk = RtkCommandRow {
+        rtk_row_id: 2,
+        ts: "2026-07-01T10:00:06.500000000+00:00".to_string(),
+        project_path: "/home/u/projA".to_string(),
+        head_hash: cmdnorm::hash(&cmdnorm::head("ls")),
+        cmd_hash: cmdnorm::hash("ls"),
+        raw_tokens: 60,
+        filtered_tokens: 20,
+        saved_tokens: 40,
+        exec_time_ms: 5,
+    };
+    assert!(l.insert_rtk_event(&old_rtk).unwrap());
+    assert!(l.insert_rtk_event(&new_rtk).unwrap());
+    let attribution = attribute(&l).unwrap();
+    assert_eq!((attribution.text, attribution.none), (2, 0));
+
+    // All-time keeps both savings; a windowed report keeps only the in-window row.
+    assert_eq!(l.sessions(None).unwrap()[0].saved_tokens, Some(120));
+    assert_eq!(l.sessions(Some("2026-06-15")).unwrap()[0].saved_tokens, Some(40));
+    assert_eq!(l.projects(None).unwrap()[0].saved_tokens, Some(120));
+    assert_eq!(l.projects(Some("2026-06-15")).unwrap()[0].saved_tokens, Some(40));
 }
