@@ -77,10 +77,14 @@ pub async fn push_all(
             }
         }
         // Advance past every scanned row (including excluded ones) so an excluded
-        // project never blocks the cursor behind it.
+        // project never blocks the cursor behind it, and clear the re-push flag on
+        // every dirty row now that the server holds >= our totals (a duplicate
+        // count still means the server already has the row). Clearing excluded
+        // rows too stops them re-scanning every batch.
         {
             let l = lock(ledger)?;
             l.set_last_pushed_id(batch.max_id).map_err(local)?;
+            l.clear_dirty(&batch.dirty_ids).map_err(local)?;
         }
         if batch.scanned < BATCH as usize {
             break;

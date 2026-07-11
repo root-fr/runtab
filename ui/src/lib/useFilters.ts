@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Filters } from "@/api/types";
 
-const KEYS = ["project", "machine", "from", "to"] as const;
+const KEYS = ["project", "machine", "agent", "from", "to"] as const;
 
 function readFromUrl(): Filters {
   const params = new URLSearchParams(window.location.search);

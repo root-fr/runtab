@@ -10,6 +10,9 @@ use crate::timeutil::today_utc;
 pub struct Filter {
     pub project: Option<String>,
     pub machine: Option<String>,
+    /// The agent id in local (underscore) form, e.g. `claude_code` — the DTO
+    /// boundary folds the hyphenated wire value once via `replace('-', "_")`.
+    pub agent: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
 }
@@ -27,6 +30,10 @@ impl Filter {
         }
         if let Some(v) = &self.machine {
             sql.push_str(" AND machine_id = ?");
+            p.push(v.clone());
+        }
+        if let Some(v) = &self.agent {
+            sql.push_str(" AND source = ?");
             p.push(v.clone());
         }
         if let Some(v) = &self.from {
@@ -67,6 +74,22 @@ pub struct Summary {
 #[derive(Debug, Serialize)]
 pub struct ModelRow {
     pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub total_tokens: u64,
+    pub est_cost_microusd: u64,
+    pub unpriced_events: u64,
+    pub share: f64,
+}
+
+/// Per-agent aggregate: the `/api/models` row shape with `agent` (hyphen form)
+/// in place of `model`.
+#[derive(Debug, Serialize)]
+pub struct AgentRow {
+    pub agent: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
@@ -189,6 +212,44 @@ impl Ledger {
             .into_iter()
             .map(|r| ModelRow {
                 model: r.0,
+                input_tokens: u(r.1),
+                output_tokens: u(r.2),
+                cache_read_tokens: u(r.3),
+                cache_creation_tokens: u(r.4),
+                reasoning_tokens: u(r.5),
+                total_tokens: u(r.6),
+                est_cost_microusd: u(r.7),
+                unpriced_events: u(r.8),
+                share: share(r.6, grand),
+            })
+            .collect())
+    }
+
+    pub fn api_agents(&self, f: &Filter) -> rusqlite::Result<Vec<AgentRow>> {
+        let (where_sql, p) = f.clause();
+        let sql = format!(
+            "SELECT REPLACE(source, '_', '-'),
+                    COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+                    COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0),
+                    COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM({total}),0),
+                    COALESCE(SUM(est_cost_microusd),0), COALESCE(SUM(unpriced),0)
+             FROM merged_events{where_sql} GROUP BY source ORDER BY 7 DESC",
+            total = TOTAL_TOKENS_EXPR
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows: Vec<ModelAgg> = stmt
+            .query_map(params_from_iter(p.iter()), |r| {
+                Ok((
+                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+                    r.get(7)?, r.get(8)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        let grand: i64 = rows.iter().map(|r| r.6).sum();
+        Ok(rows
+            .into_iter()
+            .map(|r| AgentRow {
+                agent: r.0,
                 input_tokens: u(r.1),
                 output_tokens: u(r.2),
                 cache_read_tokens: u(r.3),

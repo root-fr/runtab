@@ -2,14 +2,16 @@ import type { SyncMachine } from "@/api/types";
 import { Select } from "@/components/ui/select";
 import type { FiltersController } from "@/lib/useFilters";
 import { activePresetId, rangePresets } from "@/lib/dateRanges";
+import { agentLabel } from "@/lib/format";
 
 interface FilterControlsProps {
   controller: FiltersController;
   projectOptions: string[];
   machines: SyncMachine[];
+  agentOptions: string[];
 }
 
-export function FilterControls({ controller, projectOptions, machines }: FilterControlsProps) {
+export function FilterControls({ controller, projectOptions, machines, agentOptions }: FilterControlsProps) {
   const { filters, setFilter, setRange } = controller;
   const presets = rangePresets();
   const activePreset = activePresetId(filters);
@@ -22,6 +24,17 @@ export function FilterControls({ controller, projectOptions, machines }: FilterC
     { value: "", label: "All machines" },
     ...machines.map((m) => ({ value: m.machine_id, label: m.machine_name })),
   ];
+  // Surface the active agent even when it isn't in the ranked options (a shared
+  // `?agent=` URL on a single-agent machine, or an unknown value) so the filter
+  // is always visible and clearable.
+  const agentValues = filters.agent && !agentOptions.includes(filters.agent)
+    ? [...agentOptions, filters.agent]
+    : agentOptions;
+  const agentOpts = [
+    { value: "", label: "All agents" },
+    ...agentValues.map((a) => ({ value: a, label: agentLabel(a) })),
+  ];
+  const showAgents = agentOptions.length > 1 || !!filters.agent;
 
   function onPreset(id: string): void {
     if (id === "custom") {
@@ -49,6 +62,15 @@ export function FilterControls({ controller, projectOptions, machines }: FilterC
           value={filters.machine ?? ""}
           options={machineOpts}
           onChange={(v) => setFilter("machine", v || undefined)}
+          className="min-w-[9rem]"
+        />
+      )}
+      {showAgents && (
+        <Select
+          ariaLabel="Filter by agent"
+          value={filters.agent ?? ""}
+          options={agentOpts}
+          onChange={(v) => setFilter("agent", v || undefined)}
           className="min-w-[9rem]"
         />
       )}

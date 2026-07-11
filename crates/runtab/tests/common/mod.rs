@@ -35,6 +35,26 @@ pub fn ev(
     }
 }
 
+/// Like `ev`, but with a controllable `source` (agent id in local underscore
+/// form, e.g. `"claude_code"`/`"codex"`) so tests can exercise the agent filter
+/// and the `/api/agents` rollup across sources.
+#[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
+pub fn ev_src(
+    source: &str,
+    msg: &str,
+    session: &str,
+    project: &str,
+    model: &str,
+    ts: &str,
+    input: i64,
+) -> UsageEvent {
+    UsageEvent {
+        source: source.to_string(),
+        ..ev(msg, session, project, model, ts, input, CostBasis::Estimated, None)
+    }
+}
+
 pub fn insert(l: &Ledger, e: &UsageEvent) {
     l.upsert(e).expect("upsert");
 }

@@ -8,6 +8,7 @@ interface StickyBarProps {
   controller: FiltersController;
   projectOptions: string[];
   machines: SyncMachine[];
+  agentOptions: string[];
   summary: Summary | undefined;
   planWindow: PlanWindowResponse | undefined;
   sync: SyncStatus | undefined;
@@ -33,14 +34,14 @@ const SYNC_LABEL: Record<SyncStatus["state"], string> = {
 };
 
 export function StickyBar({
-  controller, projectOptions, machines, summary, planWindow, sync, onOpenSettings,
+  controller, projectOptions, machines, agentOptions, summary, planWindow, sync, onOpenSettings,
 }: StickyBarProps) {
   const showPlan = summary?.plan_window_applicable && planWindow?.rolling_5h;
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
         <span className="text-sm font-semibold tracking-tight">runtab</span>
-        <FilterControls controller={controller} projectOptions={projectOptions} machines={machines} />
+        <FilterControls controller={controller} projectOptions={projectOptions} machines={machines} agentOptions={agentOptions} />
         <div className="ml-auto flex items-center gap-2">
           {showPlan && planWindow?.rolling_5h && (
             <a href="#plan-window" aria-label="Jump to plan window">

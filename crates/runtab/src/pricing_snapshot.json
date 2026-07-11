@@ -1,6 +1,6 @@
 {
-  "snapshot_date": "2026-07-06",
-  "note": "Per-token USD rates keyed by model-id prefix, longest match wins. Derived from published per-1M list prices. Opus 4.5-4.8 list at 5/25; Opus 4.0 and 4.1 (both still served) and Claude 3 Opus list at 15/75, so they get their own prefixes rather than being folded into the opus-4 family. Cache rates follow the standard multipliers: cache read = 0.1x input, cache write 5m = 1.25x input, cache write 1h = 2x input. Sonnet family uses the standard 3/15 base list price (the Sonnet 5 intro 2/10 promo running through 2026-08-31 is intentionally not applied). Every dollar computed from these rates is an estimate.",
+  "snapshot_date": "2026-07-11",
+  "note": "Per-token USD rates keyed by model-id prefix, longest match wins. Derived from published per-1M list prices. Opus 4.5-4.8 list at 5/25; Opus 4.0 and 4.1 (both still served) and Claude 3 Opus list at 15/75, so they get their own prefixes rather than being folded into the opus-4 family. Cache rates follow the standard multipliers: cache read = 0.1x input, cache write 5m = 1.25x input, cache write 1h = 2x input. Sonnet family uses the standard 3/15 base list price (the Sonnet 5 intro 2/10 promo running through 2026-08-31 is intentionally not applied). OpenAI does not bill cache writes, so both write rates are 0.0 for every gpt-5/codex prefix; the cached-input list rate is mapped to cache_read (the codex adapter puts cached_input_tokens into cache_read_tokens). gpt-5/gpt-5.1/codex family rates verified against https://platform.openai.com/docs/pricing on 2026-07-11: those specific ids no longer appear on the live page (OpenAI has moved the lineup to gpt-5.3+), so their knowledge-cutoff list prices are retained unchanged for the codex rollouts that still reference them; the currently-live gpt-5.3-codex and gpt-5.4/5.5/5.6 flagships were read off the live page and added so newer rollouts also price. Every dollar computed from these rates is an estimate.",
   "models": [
     {
       "prefix": "claude-opus-4-5",
@@ -113,6 +113,150 @@
       "cache_read": 0.000001,
       "cache_write_5m": 0.0000125,
       "cache_write_1h": 0.00002
+    },
+    {
+      "prefix": "gpt-5.1-codex-mini",
+      "input": 0.00000025,
+      "output": 0.000002,
+      "cache_read": 0.000000025,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.1-codex",
+      "input": 0.00000125,
+      "output": 0.00001,
+      "cache_read": 0.000000125,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.1",
+      "input": 0.00000125,
+      "output": 0.00001,
+      "cache_read": 0.000000125,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5-codex",
+      "input": 0.00000125,
+      "output": 0.00001,
+      "cache_read": 0.000000125,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5-mini",
+      "input": 0.00000025,
+      "output": 0.000002,
+      "cache_read": 0.000000025,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5-nano",
+      "input": 0.00000005,
+      "output": 0.0000004,
+      "cache_read": 0.000000005,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5",
+      "input": 0.00000125,
+      "output": 0.00001,
+      "cache_read": 0.000000125,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "codex-mini",
+      "input": 0.0000015,
+      "output": 0.000006,
+      "cache_read": 0.000000375,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.3-codex",
+      "input": 0.00000175,
+      "output": 0.000014,
+      "cache_read": 0.000000175,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.4-mini",
+      "input": 0.00000075,
+      "output": 0.0000045,
+      "cache_read": 0.000000075,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.4-nano",
+      "input": 0.0000002,
+      "output": 0.00000125,
+      "cache_read": 0.00000002,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.4-pro",
+      "input": 0.00003,
+      "output": 0.00018,
+      "cache_read": 0.0,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.4",
+      "input": 0.0000025,
+      "output": 0.000015,
+      "cache_read": 0.00000025,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.5-pro",
+      "input": 0.00003,
+      "output": 0.00018,
+      "cache_read": 0.0,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.5",
+      "input": 0.000005,
+      "output": 0.00003,
+      "cache_read": 0.0000005,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.6-sol",
+      "input": 0.000005,
+      "output": 0.00003,
+      "cache_read": 0.0000005,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.6-terra",
+      "input": 0.0000025,
+      "output": 0.000015,
+      "cache_read": 0.00000025,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
+    },
+    {
+      "prefix": "gpt-5.6-luna",
+      "input": 0.000001,
+      "output": 0.000006,
+      "cache_read": 0.0000001,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0
     }
   ]
 }

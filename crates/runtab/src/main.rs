@@ -153,7 +153,8 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         None => {
             let adapters = runtab::default_adapters();
-            let mut summary = scan_with_progress_line(&ledger, &adapters, &pricing);
+            let db_adapters = runtab::default_db_adapters();
+            let mut summary = scan_with_progress_line(&ledger, &adapters, &db_adapters, &pricing);
             summary.rtk = runtab::scan_rtk(&ledger);
             // The overview has no diagnostics section, so a scan that lost
             // events must not fail silently on the default entry point.
@@ -171,7 +172,8 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Scan { json }) => {
             let was_empty = !json && ledger.totals(None)?.events == 0;
             let adapters = runtab::default_adapters();
-            let mut summary = scan_with_progress_line(&ledger, &adapters, &pricing);
+            let db_adapters = runtab::default_db_adapters();
+            let mut summary = scan_with_progress_line(&ledger, &adapters, &db_adapters, &pricing);
             summary.rtk = runtab::scan_rtk(&ledger);
             if json {
                 report::print_json(&summary)?;
@@ -217,11 +219,15 @@ struct ToolsReport {
     rtk: Option<RtkTotals>,
 }
 
-/// Runs a scan with a single-line progress indicator on stderr. TTY-only and
-/// throttled so piped/cron output stays clean and fast.
+/// Runs a full scan (file + DB sources) with a single-line progress indicator on
+/// stderr. TTY-only and throttled so piped/cron output stays clean and fast. Each
+/// DB source counts as one progress unit, so opencode/hermes advance the bar the
+/// same way a scanned file does — the count is dominated by transcript files, so
+/// the label stays "files".
 fn scan_with_progress_line(
     ledger: &Ledger,
     adapters: &[Box<dyn runtab::adapters::Adapter>],
+    db_adapters: &[Box<dyn runtab::adapters::DbAdapter>],
     pricing: &Pricing,
 ) -> runtab::ScanSummary {
     use std::io::{IsTerminal, Write};
@@ -238,7 +244,7 @@ fn scan_with_progress_line(
             let _ = std::io::stderr().flush();
         }
     };
-    let summary = runtab::scan_with_progress(ledger, adapters, pricing, &mut cb);
+    let summary = runtab::scan_all_with_progress(ledger, adapters, db_adapters, pricing, &mut cb);
     if printed {
         eprint!("\r\x1b[K");
         let _ = std::io::stderr().flush();

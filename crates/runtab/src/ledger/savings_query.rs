@@ -7,7 +7,7 @@
 //!
 //! Unattributed rows (`match_kind = 'none'`) have no session and cannot be
 //! scoped, so they are surfaced as a separate `saved_unattributed` figure only
-//! when no project/machine filter is set — never folded into the headline ratio
+//! when no project/machine/agent filter is set — never folded into the headline ratio
 //! (the anti-vanity guard: grep-noise that never reached a model stays visible
 //! and separate).
 
@@ -23,8 +23,8 @@ pub struct SavingsWindow {
     pub consumed_tokens: u64,
     /// rtk savings tied to a real in-filter session (the headline numerator).
     pub saved_attributed: u64,
-    /// `match_kind='none'` savings in the from/to window; `null` when a project
-    /// or machine filter is set (they can't be scoped to one).
+    /// `match_kind='none'` savings in the from/to window; `null` when a project,
+    /// machine or agent filter is set (they can't be scoped to one).
     pub saved_unattributed: Option<u64>,
     /// Attributed command count in-filter.
     pub commands: u64,
@@ -106,9 +106,9 @@ impl Ledger {
                 Ok((r.get(0)?, r.get(1)?))
             })?;
 
-        // Unattributed savings: only surfaced with neither project nor machine
+        // Unattributed savings: only surfaced with no project/machine/agent
         // filter set (they can't be scoped to one). Honours from/to.
-        let scoped = f.project.is_some() || f.machine.is_some();
+        let scoped = f.project.is_some() || f.machine.is_some() || f.agent.is_some();
         let saved_unattributed = if scoped {
             None
         } else {
@@ -232,6 +232,12 @@ mod tests {
     /// Insert one consumption row straight into `usage_events`, controlling the
     /// `project_label`/`machine_id`/`session_id`/`ts` the merged view exposes.
     fn consume(l: &Ledger, session: &str, project: &str, machine: &str, ts: &str, total: i64) {
+        consume_src(l, "claude_code", session, project, machine, ts, total);
+    }
+
+    /// `consume` with an explicit `source` (agent id in local underscore form),
+    /// so the agent filter can be exercised across sources.
+    fn consume_src(l: &Ledger, source: &str, session: &str, project: &str, machine: &str, ts: &str, total: i64) {
         l.conn
             .execute(
                 "INSERT INTO usage_events
@@ -240,7 +246,7 @@ mod tests {
                      cache_1h_tokens, cache_5m_tokens, reasoning_tokens,
                      project, agent_version, cost_usd, cost_basis,
                      project_label, machine_id, machine_name)
-                 VALUES ('claude_code', ?1, ?1, ?2, ?3, 'm', ?4, 0, 0, 0, 0, 0, 0,
+                 VALUES (?7, ?1, ?1, ?2, ?3, 'm', ?4, 0, 0, 0, 0, 0, 0,
                          ?5, 'v', NULL, 'estimated', ?5, ?6, ?6)",
                 rusqlite::params![
                     format!("{session}-{ts}-{total}"),
@@ -248,7 +254,8 @@ mod tests {
                     ts,
                     total,
                     project,
-                    machine
+                    machine,
+                    source
                 ],
             )
             .unwrap();
@@ -371,6 +378,30 @@ mod tests {
         let r = l.savings(&f).unwrap();
         assert_eq!(r.window.consumed_tokens, 20_000);
         assert_eq!(r.window.saved_attributed, 900);
+        assert_eq!(r.window.saved_unattributed, None);
+    }
+
+    #[test]
+    fn agent_filter_scopes_attributed_and_nulls_unattributed() {
+        let l = Ledger::open_in_memory().unwrap();
+        // Two sources; the attributed rtk rows join back through session_id, so
+        // scoping the merged side by `source` scopes the attributed savings too.
+        consume_src(&l, "claude_code", "s_cc", "proj", "mach", "2026-07-01T00:00:00Z", 10_000);
+        consume_src(&l, "codex", "s_cx", "proj", "mach", "2026-07-01T00:00:00Z", 20_000);
+        saved_attributed(&l, 1, "s_cc", "2026-07-01T00:00:00Z", 800);
+        saved_attributed(&l, 2, "s_cx", "2026-07-01T00:00:00Z", 999);
+        saved_unattributed(&l, 3, "2026-07-01T00:00:00Z", 300);
+
+        let f = Filter {
+            agent: Some("codex".to_string()),
+            ..Filter::default()
+        };
+        let r = l.savings(&f).unwrap();
+        // Only codex's session survives the join.
+        assert_eq!(r.window.consumed_tokens, 20_000);
+        assert_eq!(r.window.saved_attributed, 999);
+        assert_eq!(r.window.commands, 1);
+        // Unattributed rows carry no source ⇒ can't be scoped to an agent ⇒ null.
         assert_eq!(r.window.saved_unattributed, None);
     }
 

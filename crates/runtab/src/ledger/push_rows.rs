@@ -11,11 +11,17 @@ const MAX_PROJECT_LABEL: usize = 120;
 const MAX_MACHINE_NAME: usize = 64;
 const MAX_MODEL: usize = 100;
 
+// Server validate.rs caps, mirrored: a cumulative counter (hermes) can plausibly
+// cross these, and a 422 rejects the whole append-only batch permanently. The
+// local ledger stays exact — only the wire copy saturates.
+const MAX_TOKENS: u64 = 100_000_000;
+const MAX_COST: u64 = 10_000_000_000;
+
 // Row column order shared by `pending_batch` and `preview_record`.
 const ROW_COLUMNS: &str = "ue.id, ue.source, ue.message_id, ue.request_id, ue.session_id, ue.ts,
     ue.model, ue.project_label, ue.project, pp.synced_label, COALESCE(pp.excluded, 0),
     ue.machine_id, ue.machine_name, ue.input_tokens, ue.output_tokens, ue.cache_read_tokens,
-    ue.cache_creation_tokens, ue.reasoning_tokens, ue.cost_usd, ue.cost_basis";
+    ue.cache_creation_tokens, ue.reasoning_tokens, ue.cost_usd, ue.cost_basis, ue.dirty";
 
 /// A batch of local rows turned into whitelist records, plus the highest row id
 /// scanned (so the cursor advances past excluded rows) and how many rows were
@@ -24,6 +30,11 @@ pub struct PendingBatch {
     pub records: Vec<SyncedRecord>,
     pub max_id: i64,
     pub scanned: usize,
+    /// Ids of every scanned row carrying `dirty = 1`, including excluded ones.
+    /// The caller clears these after the server accepts the batch so a grown
+    /// row is re-pushed exactly once per growth (excluded rows never push, so
+    /// their flag must still be cleared or they re-scan every batch forever).
+    pub dirty_ids: Vec<i64>,
 }
 
 impl Ledger {
@@ -40,27 +51,35 @@ impl Ledger {
             |r| r.get(0),
         )?;
         if !self.projects_reviewed()? {
-            return Ok(PendingBatch { records: Vec::new(), max_id: last, scanned: 0 });
+            return Ok(PendingBatch { records: Vec::new(), max_id: last, scanned: 0, dirty_ids: Vec::new() });
         }
+        // `id > cursor` catches new rows; `dirty = 1` re-catches grown rows below
+        // the cursor (the append-only id watermark never re-selects an in-place
+        // update).
         let sql = format!(
             "SELECT {ROW_COLUMNS} FROM usage_events ue
              LEFT JOIN project_prefs pp ON pp.name = COALESCE(ue.project_label, ue.project)
-             WHERE ue.id > ?1 ORDER BY ue.id ASC LIMIT ?2"
+             WHERE (ue.id > ?1 OR ue.dirty = 1) ORDER BY ue.id ASC LIMIT ?2"
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let mut max_id = last;
         let mut scanned = 0usize;
         let mut records = Vec::new();
+        let mut dirty_ids = Vec::new();
         let mut rows = stmt.query(params![last, limit])?;
         while let Some(r) = rows.next()? {
-            max_id = max_id.max(r.get::<_, i64>(0)?);
+            let id = r.get::<_, i64>(0)?;
+            max_id = max_id.max(id);
             scanned += 1;
+            if r.get::<_, i64>(20)? != 0 {
+                dirty_ids.push(id);
+            }
             if r.get::<_, i64>(10)? != 0 {
                 continue;
             }
             records.push(self.row_to_record(r)?);
         }
-        Ok(PendingBatch { records, max_id, scanned })
+        Ok(PendingBatch { records, max_id, scanned, dirty_ids })
     }
 
     /// One real derived record for the "See exactly what syncs" drawer: the exact
@@ -117,12 +136,12 @@ impl Ledger {
 }
 
 fn uu(v: i64) -> u64 {
-    v.max(0) as u64
+    (v.max(0) as u64).min(MAX_TOKENS)
 }
 
 fn micro(cost: Option<f64>) -> u64 {
     match cost {
-        Some(c) if c > 0.0 => (c * 1_000_000.0).round() as u64,
+        Some(c) if c > 0.0 => ((c * 1_000_000.0).round() as u64).min(MAX_COST),
         _ => 0,
     }
 }

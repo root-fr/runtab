@@ -33,6 +33,18 @@ pub fn epoch_to_rfc3339(secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
 }
 
+/// RFC 3339 UTC with millisecond precision, e.g. `2026-07-11T09:00:00.120Z` —
+/// the same shape claude_code transcripts carry, so all sources sort uniformly.
+pub fn epoch_ms_to_rfc3339(ms: i64) -> String {
+    let secs = ms.div_euclid(1000);
+    let millis = ms.rem_euclid(1000);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (y, m, d) = civil_from_days(days);
+    let (hh, mm, ss) = (rem / 3600, rem % 3600 / 60, rem % 60);
+    format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}.{millis:03}Z")
+}
+
 /// `date - days` as `YYYY-MM-DD`.
 pub fn date_minus_days(date: &str, days: i64) -> String {
     match parse_date_to_epoch(date) {

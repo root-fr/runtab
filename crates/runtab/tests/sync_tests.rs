@@ -10,6 +10,7 @@ use axum::{Json, Router};
 use common::{ev, insert, review_all};
 use runtab::ledger::{Filter, Ledger};
 use runtab::model::CostBasis::Estimated;
+use runtab::model::{CostBasis, UsageEvent};
 use runtab::sync::client::{PollOutcome, SyncClient};
 use runtab::sync::{pull_all, push_all};
 use runtab::wire::{
@@ -388,4 +389,238 @@ fn review_gate_and_prefs_shape_the_push() {
     assert_eq!(batch.records[0].project_label, "client-x"); // the rename is honoured
     assert_eq!(batch.scanned, 2); // cursor still advances past the excluded row
     assert_eq!(l.pending_push_count().unwrap(), 1); // excluded row is not counted
+}
+
+/// A cumulative event that can grow in place: same dedup key, more tokens.
+fn cumulative_event(msg: &str, source: &str, input: i64) -> UsageEvent {
+    UsageEvent {
+        source: source.to_string(),
+        message_id: msg.to_string(),
+        request_id: String::new(),
+        session_id: "sess".to_string(),
+        ts: "2026-07-01T10:00:00Z".to_string(),
+        model: "claude-opus-4-8".to_string(),
+        input_tokens: input,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        cache_1h_tokens: 0,
+        cache_5m_tokens: 0,
+        reasoning_tokens: 0,
+        project: "p".to_string(),
+        agent_version: String::new(),
+        cost_usd: None,
+        cost_basis: Estimated,
+    }
+}
+
+#[test]
+fn replaced_higher_sets_dirty() {
+    use runtab::ledger::UpsertResult;
+    let l = Ledger::open_in_memory().unwrap();
+    assert_eq!(l.upsert(&cumulative_event("m1", "hermes", 100)).unwrap(), UpsertResult::Inserted);
+    assert_eq!(
+        l.upsert(&cumulative_event("m1", "hermes", 300)).unwrap(),
+        UpsertResult::ReplacedHigher
+    );
+
+    // The grown row is flagged dirty so the append-only push cursor re-selects it.
+    let batch = { review_all(&l); l.pending_batch(100).unwrap() };
+    assert_eq!(batch.dirty_ids.len(), 1);
+}
+
+#[test]
+fn dirty_row_below_cursor_is_re_selected_and_cleared() {
+    use runtab::ledger::UpsertResult;
+    let l = Ledger::open_in_memory().unwrap();
+    l.upsert(&cumulative_event("m1", "hermes", 100)).unwrap();
+    review_all(&l);
+
+    // Push the row: advance the cursor past it, then clear its dirty flag.
+    let batch = l.pending_batch(100).unwrap();
+    assert_eq!(batch.records.len(), 1);
+    let pushed_id = batch.max_id;
+    l.set_last_pushed_id(pushed_id).unwrap();
+    l.clear_dirty(&batch.dirty_ids).unwrap();
+
+    // Nothing pending now: the row is below the cursor and not dirty.
+    let drained = l.pending_batch(100).unwrap();
+    assert_eq!(drained.records.len(), 0);
+    assert_eq!(drained.dirty_ids.len(), 0);
+
+    // The row grows in place -> ReplacedHigher -> dirty -> re-selected below the cursor.
+    assert_eq!(
+        l.upsert(&cumulative_event("m1", "hermes", 500)).unwrap(),
+        UpsertResult::ReplacedHigher
+    );
+    let regrown = l.pending_batch(100).unwrap();
+    assert_eq!(regrown.records.len(), 1, "grown row must re-push below the cursor");
+    assert_eq!(regrown.dirty_ids.len(), 1);
+    assert_eq!(regrown.records[0].input_tokens, 500);
+
+    // Clearing the dirty flag stops re-selection.
+    l.clear_dirty(&regrown.dirty_ids).unwrap();
+    assert_eq!(l.pending_batch(100).unwrap().records.len(), 0);
+}
+
+#[test]
+fn excluded_dirty_row_is_reported_and_cleared() {
+    use runtab::ledger::{ReviewItem, UpsertResult};
+    let l = Ledger::open_in_memory().unwrap();
+    l.upsert(&cumulative_event("m1", "hermes", 100)).unwrap();
+    // Exclude the project: the row never pushes, but its dirty flag must still be
+    // reported so the caller can clear it (else it re-scans every batch forever).
+    l.set_project_review(&[ReviewItem {
+        name: "p".to_string(),
+        label: None,
+        excluded: true,
+    }])
+    .unwrap();
+
+    let batch = l.pending_batch(100).unwrap();
+    l.set_last_pushed_id(batch.max_id).unwrap();
+    l.clear_dirty(&batch.dirty_ids).unwrap();
+
+    // Grow it: it is dirty again, reported in dirty_ids even though excluded.
+    assert_eq!(
+        l.upsert(&cumulative_event("m1", "hermes", 400)).unwrap(),
+        UpsertResult::ReplacedHigher
+    );
+    let regrown = l.pending_batch(100).unwrap();
+    assert_eq!(regrown.records.len(), 0, "excluded row never pushes");
+    assert_eq!(regrown.dirty_ids.len(), 1, "but its dirty flag is still reported");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grown_row_is_re_pushed_after_first_push() {
+    let (base, _) = spawn_server().await;
+    let client = SyncClient::new(&base).unwrap();
+
+    let l = Ledger::open_in_memory().unwrap();
+    l.upsert(&cumulative_event("m1", "hermes", 100)).unwrap();
+    review_all(&l);
+    let event_id = l.pending_batch(1000).unwrap().records[0].event_id.clone();
+
+    let m = Mutex::new(l);
+    assert_eq!(push_all(&m, &client, "tok").await.unwrap().pushed, 1);
+
+    // The row grows in place: same dedup key, higher totals.
+    {
+        let l = m.lock().unwrap();
+        l.upsert(&cumulative_event("m1", "hermes", 999)).unwrap();
+    }
+
+    // The same event_id is pending again despite being below the push cursor.
+    let batch = m.lock().unwrap().pending_batch(1000).unwrap();
+    let ids: Vec<&str> = batch.records.iter().map(|r| r.event_id.as_str()).collect();
+    assert!(ids.contains(&event_id.as_str()), "grown row must re-appear in the batch");
+    assert_eq!(batch.records[0].input_tokens, 999);
+}
+
+#[test]
+fn upsert_remote_keeps_higher_and_ignores_lower() {
+    let dir = std::env::temp_dir();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = dir.join(format!("runtab_upsert_remote_{}_{nanos}.db", std::process::id()));
+
+    let mut rec = record("re1", "other");
+    rec.input_tokens = 100;
+    {
+        let l = Ledger::open(&path).unwrap();
+        // First pull inserts.
+        l.upsert_remote(&PulledRecord { server_seq: 1, record: rec.clone() }).unwrap();
+        // A strictly-higher re-pull replaces (carrying the fresh server_seq).
+        let mut higher = rec.clone();
+        higher.input_tokens = 500;
+        l.upsert_remote(&PulledRecord { server_seq: 7, record: higher }).unwrap();
+        // A lower re-pull is ignored.
+        let mut lower = rec.clone();
+        lower.input_tokens = 50;
+        l.upsert_remote(&PulledRecord { server_seq: 9, record: lower }).unwrap();
+
+        let summary = l.api_summary(&Filter::default()).unwrap();
+        assert_eq!(summary.total_tokens, 500, "keep-higher must retain the 500-token row");
+    }
+
+    // Exactly one remote row survived, carrying the higher pull's server_seq.
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let rows: i64 = conn
+        .query_row("SELECT COUNT(*) FROM remote_events WHERE event_id = 're1'", [], |r| r.get(0))
+        .unwrap();
+    let seq: i64 = conn
+        .query_row("SELECT server_seq FROM remote_events WHERE event_id = 're1'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(rows, 1);
+    assert_eq!(seq, 7);
+    drop(conn);
+    let _ = std::fs::remove_file(&path);
+}
+
+/// A usage event with an explicit source and cost basis, for the plan-window pin.
+#[allow(clippy::too_many_arguments)]
+fn sourced_event(msg: &str, source: &str, ts: &str, input: i64, basis: CostBasis) -> UsageEvent {
+    UsageEvent {
+        source: source.to_string(),
+        message_id: msg.to_string(),
+        request_id: format!("r-{msg}"),
+        session_id: format!("s-{msg}"),
+        ts: ts.to_string(),
+        model: "claude-opus-4-8".to_string(),
+        input_tokens: input,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        cache_1h_tokens: 0,
+        cache_5m_tokens: 0,
+        reasoning_tokens: 0,
+        project: "p".to_string(),
+        agent_version: String::new(),
+        cost_usd: None,
+        cost_basis: basis,
+    }
+}
+
+#[test]
+fn plan_windows_count_only_claude_code_tokens() {
+    let l = Ledger::open_in_memory().unwrap();
+    // One minute ago, so the event sits inside the rolling 5h window at any
+    // wall-clock time of day.
+    let ts = runtab::timeutil::epoch_to_rfc3339(runtab::timeutil::now_epoch() - 60);
+    // Claude subscription usage counts toward the plan.
+    insert(&l, &sourced_event("c1", "claude_code", &ts, 100, Estimated));
+    // Foreign-agent estimated tokens must NOT contaminate the Claude plan gauges.
+    insert(&l, &sourced_event("x1", "codex", &ts, 1_000, Estimated));
+    insert(&l, &sourced_event("x2", "opencode", &ts, 10_000, Estimated));
+    insert(&l, &sourced_event("x3", "hermes", &ts, 100_000, Estimated));
+
+    let windows = l.api_planwindow(&Filter::default()).unwrap();
+    assert!(windows.applicable);
+    let five_h = windows.rolling_5h.unwrap();
+    assert_eq!(five_h.tokens_used, 100, "only the 100 claude_code tokens count");
+    let weekly = windows.weekly.unwrap();
+    assert_eq!(weekly.tokens_used, 100);
+}
+
+#[test]
+fn scan_all_with_empty_db_adapters_matches_scan() {
+    // With no file adapters and no DB adapters, `scan_all` is exactly `scan`:
+    // it scans nothing and never touches source_cursors. Empty slices keep the
+    // test off the developer's real transcripts and DBs.
+    let l = Ledger::open_in_memory().unwrap();
+    let pricing = runtab::pricing::Pricing::load().unwrap();
+    let no_files: Vec<Box<dyn runtab::adapters::Adapter>> = Vec::new();
+    let no_dbs: Vec<Box<dyn runtab::adapters::DbAdapter>> = Vec::new();
+
+    let base = runtab::scan(&l, &no_files, &pricing);
+    let all = runtab::scan_all(&l, &no_files, &no_dbs, &pricing);
+
+    assert_eq!(base.files_scanned, all.files_scanned);
+    assert_eq!(base.events_inserted, all.events_inserted);
+    assert_eq!(all.files_scanned, 0);
+    assert_eq!(all.events_inserted, 0);
+    assert!(l.source_cursor("opencode").unwrap().is_none());
+    assert!(l.source_cursor("hermes").unwrap().is_none());
 }

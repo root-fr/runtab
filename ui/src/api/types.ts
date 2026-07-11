@@ -29,6 +29,7 @@ export interface SyncedEvent {
 export interface Filters {
   project?: string;
   machine?: string;
+  agent?: string;
   from?: string;
   to?: string;
 }
@@ -94,6 +95,23 @@ export interface ModelsResponse {
   models: ModelShare[];
 }
 
+// --- /api/agents ----------------------------------------------------------
+// Mirrors ModelShare, with `agent` (hyphenated id) replacing `model`. The
+// endpoint wraps these in `{ agents: [...] }` (like `/api/models`), ranked by
+// total tokens DESC; the client unwraps to this bare row array.
+export interface AgentShare {
+  agent: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  est_cost_microusd: number;
+  unpriced_events: number;
+  share: number;
+}
+
 // --- /api/projects --------------------------------------------------------
 export interface ProjectRow {
   project_label: string;
@@ -112,6 +130,7 @@ export interface SessionRow {
   session_id: string;
   project_label: string;
   machine_name: string;
+  agent: string;
   started_at: string;
   ended_at: string;
   model: string;
@@ -129,7 +148,7 @@ export interface SessionsResponse {
 
 // --- /api/savings ---------------------------------------------------------
 // rtk's savings against real consumption. `saved_unattributed` is null when a
-// project or machine filter is set (unattributed rows can't be scoped);
+// project, machine or agent filter is set (unattributed rows can't be scoped);
 // `savings_ratio` is null when `consumed_tokens` is 0.
 export interface SavingsWindow {
   consumed_tokens: number;

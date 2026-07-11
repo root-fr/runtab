@@ -1,6 +1,7 @@
 mod api_daily;
 mod api_query;
 mod api_sessions;
+mod cursor_store;
 mod identity;
 mod project_prefs;
 mod push_rows;
@@ -19,7 +20,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::model::UsageEvent;
 
 pub use api_daily::{DailyDay, DailyModel, HeatmapCell};
-pub use api_query::{Filter, ModeBreak, ModelRow, ProjectRow, Summary};
+pub use api_query::{AgentRow, Filter, ModeBreak, ModelRow, ProjectRow, Summary};
 pub use api_sessions::{PlanUsage, PlanWindows, SessionPage, SessionRow, Window};
 pub use identity::{basename, clamp_chars};
 pub use project_prefs::ReviewItem;
@@ -172,6 +173,10 @@ impl Ledger {
         Ok(())
     }
 
+    /// A grown row also flips `dirty = 1` so the append-only push cursor
+    /// (`id > last_pushed_id`) re-selects it: cumulative-row sources (opencode,
+    /// hermes) and Claude streaming replays update rows in place, and without
+    /// the flag the server would keep the first-seen totals forever.
     fn update_row(&self, id: i64, e: &UsageEvent) -> rusqlite::Result<()> {
         self.conn.execute(
             "UPDATE usage_events SET
@@ -179,7 +184,7 @@ impl Ledger {
                 input_tokens = ?4, output_tokens = ?5, cache_read_tokens = ?6,
                 cache_creation_tokens = ?7, cache_1h_tokens = ?8, cache_5m_tokens = ?9,
                 reasoning_tokens = ?10, project = ?11, agent_version = ?12,
-                cost_usd = ?13, cost_basis = ?14, project_label = ?16
+                cost_usd = ?13, cost_basis = ?14, project_label = ?16, dirty = 1
              WHERE id = ?15",
             params![
                 e.session_id, e.ts, e.model,

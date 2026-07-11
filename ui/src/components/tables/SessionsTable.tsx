@@ -5,7 +5,7 @@ import { api } from "@/api/client";
 import { Panel } from "@/components/panels/Panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAsync } from "@/lib/useAsync";
-import { formatClock, formatCost, formatDuration, formatInt, formatMonthDay, formatTokens } from "@/lib/format";
+import { agentLabel, formatClock, formatCost, formatDuration, formatInt, formatMonthDay, formatTokens } from "@/lib/format";
 
 const PAGE_SIZE = 25;
 
@@ -64,6 +64,7 @@ export function SessionsTable({ filters }: { filters: Filters }) {
             <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
               <th className="py-2 pr-3 font-medium">Project</th>
               <th className="py-2 pr-3 font-medium">Machine</th>
+              <th className="py-2 pr-3 font-medium">Agent</th>
               <th className="py-2 pr-3 font-medium">Model</th>
               <th className="py-2 pr-3 font-medium">Started</th>
               <th className="py-2 pr-3 text-right font-medium">Duration</th>
@@ -77,6 +78,7 @@ export function SessionsTable({ filters }: { filters: Filters }) {
               <tr key={s.session_id} className="border-b border-border/60 transition-colors hover:bg-secondary/30">
                 <td className="py-2 pr-3 font-medium text-foreground">{s.project_label}</td>
                 <td className="py-2 pr-3 text-muted-foreground">{s.machine_name}</td>
+                <td className="py-2 pr-3 text-muted-foreground">{agentLabel(s.agent)}</td>
                 <td className="py-2 pr-3 text-muted-foreground">{s.model}</td>
                 <td className="py-2 pr-3 tabular-nums text-muted-foreground">
                   {formatMonthDay(s.started_at)} {formatClock(s.started_at)}

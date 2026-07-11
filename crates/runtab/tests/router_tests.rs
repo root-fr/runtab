@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::{ev, insert};
+use common::{ev, ev_src, insert};
 use runtab::cmdnorm;
 use runtab::ledger::Ledger;
 use runtab::model::CostBasis::Estimated;
@@ -77,6 +77,7 @@ async fn every_endpoint_returns_200() {
         "/api/daily",
         "/api/models",
         "/api/projects",
+        "/api/agents",
         "/api/sessions",
         "/api/tools",
         "/api/heatmap",
@@ -266,4 +267,109 @@ async fn sessions_carry_rtk_saved_tokens_only_for_an_attributed_session() {
     assert_eq!(s1["event_count"], 2);
     assert_eq!(s1["rtk_saved_tokens"], 400, "must not double-count across s1's two usage_events rows");
     assert!(s2["rtk_saved_tokens"].is_null());
+}
+
+fn multi_agent_app() -> axum::Router {
+    let l = Ledger::open_in_memory().unwrap();
+    insert(&l, &ev_src("claude_code", "a", "s1", "A", "m1", "2026-07-01T10:00:00Z", 100));
+    insert(&l, &ev_src("codex", "b", "s2", "B", "gpt", "2026-07-02T11:00:00Z", 500));
+    runtab::serve::app(Arc::new(Mutex::new(l)))
+}
+
+#[tokio::test]
+async fn agents_payload_has_contract_fields_and_ranking() {
+    let (_, body) = get_json(multi_agent_app(), "/api/agents").await;
+    let agents = body["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), 2);
+    // Ranked by total tokens DESC: codex (500) first, hyphen form on the wire.
+    assert_eq!(agents[0]["agent"], "codex");
+    assert_eq!(agents[0]["total_tokens"], 500);
+    assert_eq!(agents[1]["agent"], "claude-code");
+    assert_eq!(agents[1]["total_tokens"], 100);
+    // Mirrors the ModelRow shape (agent replaces model).
+    assert_eq!(agents[1]["input_tokens"], 100);
+    assert!(agents[1]["cache_read_tokens"].is_u64());
+    assert!(agents[1]["est_cost_microusd"].is_u64());
+    assert!(agents[1]["unpriced_events"].is_u64());
+    assert!(agents[1]["share"].is_number());
+}
+
+#[tokio::test]
+async fn sessions_payload_carries_agent_field() {
+    let (_, body) = get_json(multi_agent_app(), "/api/sessions").await;
+    let sessions = body["sessions"].as_array().unwrap();
+    let s1 = sessions.iter().find(|s| s["session_id"] == "s1").unwrap();
+    assert_eq!(s1["agent"], "claude-code");
+    let s2 = sessions.iter().find(|s| s["session_id"] == "s2").unwrap();
+    assert_eq!(s2["agent"], "codex");
+}
+
+#[tokio::test]
+async fn agent_query_param_filters_and_bogus_yields_empty() {
+    let app = multi_agent_app();
+
+    let (_, summary) = get_json(app.clone(), "/api/summary?agent=claude-code").await;
+    assert_eq!(summary["total_tokens"], 100);
+
+    let (_, models) = get_json(app.clone(), "/api/models?agent=codex").await;
+    let models = models["models"].as_array().unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0]["model"], "gpt");
+
+    let (_, agents) = get_json(app.clone(), "/api/agents?agent=codex").await;
+    let agents = agents["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), 1);
+    assert_eq!(agents[0]["agent"], "codex");
+
+    // Unknown agent → empty arrays / zeroed totals (same as an unknown project).
+    let (_, summary) = get_json(app.clone(), "/api/summary?agent=bogus").await;
+    assert_eq!(summary["total_tokens"], 0);
+    let (_, models) = get_json(app.clone(), "/api/models?agent=bogus").await;
+    assert_eq!(models["models"].as_array().unwrap().len(), 0);
+    let (_, agents) = get_json(app.clone(), "/api/agents?agent=bogus").await;
+    assert_eq!(agents["agents"].as_array().unwrap().len(), 0);
+    let (_, sessions) = get_json(app, "/api/sessions?agent=bogus").await;
+    assert_eq!(sessions["total"], 0);
+}
+
+#[tokio::test]
+async fn heatmap_and_daily_apply_the_agent_filter() {
+    // Recent timestamps so both rows land inside the heatmap's 364-day window;
+    // exercises the clause + trailing-date-param ordering with `agent` set.
+    let l = Ledger::open_in_memory().unwrap();
+    let now = runtab::timeutil::now_epoch();
+    let recent = runtab::timeutil::epoch_to_rfc3339(now - 3600);
+    let day = &recent[..10];
+    insert(&l, &ev_src("claude_code", "a", "s1", "A", "m1", &recent, 100));
+    insert(&l, &ev_src("codex", "b", "s2", "B", "gpt", &recent, 500));
+    let app = runtab::serve::app(Arc::new(Mutex::new(l)));
+
+    let (status, heatmap) = get_json(app.clone(), "/api/heatmap?agent=codex").await;
+    assert_eq!(status, StatusCode::OK);
+    let cells = heatmap["days"].as_array().unwrap();
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0]["date"], day);
+    assert_eq!(cells[0]["total_tokens"], 500);
+    assert_eq!(heatmap["max_tokens"], 500);
+
+    let (_, daily) = get_json(app, "/api/daily?agent=codex").await;
+    let days = daily["days"].as_array().unwrap();
+    assert_eq!(days.len(), 1);
+    assert_eq!(days[0]["total_tokens"], 500);
+}
+
+#[tokio::test]
+async fn planwindow_ignores_agent_query_param() {
+    let l = Ledger::open_in_memory().unwrap();
+    let now = runtab::timeutil::now_epoch();
+    let recent = runtab::timeutil::epoch_to_rfc3339(now - 3600);
+    insert(&l, &ev_src("claude_code", "a", "s1", "A", "m1", &recent, 100));
+    insert(&l, &ev_src("codex", "b", "s2", "B", "gpt", &recent, 999));
+    let app = runtab::serve::app(Arc::new(Mutex::new(l)));
+
+    // Filtering to codex must not zero the Claude-plan gauge.
+    let (status, body) = get_json(app, "/api/planwindow?agent=codex").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["applicable"], true);
+    assert_eq!(body["rolling_5h"]["tokens_used"], 100);
 }

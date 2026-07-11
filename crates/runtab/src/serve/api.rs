@@ -77,6 +77,10 @@ pub async fn projects(State(st): State<AppState>, Query(q): Query<FilterParams>)
     Ok(Json(json!({ "projects": st.led()?.api_projects(&q.filter())? })))
 }
 
+pub async fn agents(State(st): State<AppState>, Query(q): Query<FilterParams>) -> Api<impl serde::Serialize> {
+    Ok(Json(json!({ "agents": st.led()?.api_agents(&q.filter())? })))
+}
+
 pub async fn sessions(State(st): State<AppState>, Query(q): Query<SessionParams>) -> Api<impl serde::Serialize> {
     let filter = q.filter();
     let page = q.page.unwrap_or(1);

@@ -61,11 +61,12 @@ impl Pricing {
     }
 
     /// Fill `cost_usd` from the snapshot. Unknown models leave cost NULL and are
-    /// recorded in `unknown` for the scan summary — never guessed. An event that
-    /// already carries a logged/billed cost (the agent wrote a real `costUSD`)
-    /// is left untouched: that basis is preferred over the estimate.
+    /// recorded in `unknown` for the scan summary — never guessed. Any
+    /// adapter-provided figure — a logged real cost or a source-computed
+    /// estimate — is better-informed than the embedded snapshot, so it is kept
+    /// with its declared basis and never flags the model unknown.
     pub fn apply(&self, e: &mut UsageEvent, unknown: &mut BTreeSet<String>) {
-        if matches!(e.cost_basis, CostBasis::Logged | CostBasis::Billed) && e.cost_usd.is_some() {
+        if e.cost_usd.is_some() {
             return;
         }
         e.cost_basis = CostBasis::Estimated;

@@ -1,5 +1,5 @@
 import type {
-  DailyResponse, Filters, HeatmapResponse, ModelsResponse, ModelTokens,
+  AgentShare, DailyResponse, Filters, HeatmapResponse, ModelsResponse, ModelTokens,
   PlanWindowResponse, PreviewRecordResponse, ProjectsResponse, ReviewProject,
   ReviewState, SavingsResponse, SessionRow, SessionsResponse, Settings, Summary,
   SyncedEvent, SyncStatus,
@@ -23,6 +23,7 @@ function applyFilters(rows: Bucket[], f: Filters): Bucket[] {
   return rows.filter((r) =>
     (!f.project || r.project_label === f.project) &&
     (!f.machine || r.machine_id === f.machine) &&
+    (!f.agent || r.agent === f.agent) &&
     (!f.from || r.date >= f.from) &&
     (!f.to || r.date <= f.to));
 }
@@ -121,6 +122,23 @@ function models(f: Filters): ModelsResponse {
   };
 }
 
+function agents(f: Filters): AgentShare[] {
+  const rows = applyFilters(DATASET, f);
+  const map = new Map<string, ModelTokens>();
+  for (const b of rows) {
+    const a = map.get(b.agent) ?? emptyModel(b.agent);
+    addInto(a, b);
+    map.set(b.agent, a);
+  }
+  const grand = [...map.values()].reduce((s, a) => s + a.total_tokens, 0) || 1;
+  return [...map.entries()]
+    .sort(([, a], [, b]) => b.total_tokens - a.total_tokens)
+    .map(([agent, a]) => {
+      const { model: _model, ...rest } = a;
+      return { agent, ...rest, unpriced_events: 0, share: a.total_tokens / grand };
+    });
+}
+
 function projects(f: Filters): ProjectsResponse {
   const rows = applyFilters(DATASET, f);
   const map = new Map<string, { tokens: number; cost: number; sessions: Set<string> }>();
@@ -154,6 +172,7 @@ function buildSessions(): SessionRow[] {
       session_id: `sess-${b.date}-${b.machine_id}-${i}`,
       project_label: b.project_label,
       machine_name: b.machine_name,
+      agent: b.agent,
       started_at: start.toISOString(),
       ended_at: end.toISOString(),
       model: b.model,
@@ -191,8 +210,8 @@ function heatmap(f: Filters): HeatmapResponse {
 // Deterministic per-day attributed savings as a small slice of that day's real
 // consumption, so the fixture headline lands near the spec's ~2% example while
 // the daily saved curve tracks the consumed one. Unattributed savings (grep
-// noise that never reached a model) are surfaced only with no project/machine
-// filter, mirroring the endpoint contract.
+// noise that never reached a model) are surfaced only with no
+// project/machine/agent filter, mirroring the endpoint contract.
 function savings(f: Filters): SavingsResponse {
   const { days } = daily(f);
   const daily_rows = days.map((d, i) => ({
@@ -202,7 +221,7 @@ function savings(f: Filters): SavingsResponse {
   }));
   const consumed_tokens = daily_rows.reduce((s, d) => s + d.consumed, 0);
   const saved_attributed = daily_rows.reduce((s, d) => s + d.saved, 0);
-  const scoped = !!(f.project || f.machine);
+  const scoped = !!(f.project || f.machine || f.agent);
   return {
     window: {
       consumed_tokens,
@@ -296,6 +315,7 @@ export const fixtureApi = {
   summary: (f: Filters = {}) => delay(summary(f)),
   daily: (f: Filters = {}) => delay(daily(f)),
   models: (f: Filters = {}) => delay(models(f)),
+  agents: (f: Filters = {}) => delay(agents(f)),
   projects: (f: Filters = {}) => delay(projects(f)),
   savings: (f: Filters = {}) => delay(savings(f)),
   sessions: (f: Filters = {}, page = 1, pageSize = 50) => delay(sessions(f, page, pageSize)),

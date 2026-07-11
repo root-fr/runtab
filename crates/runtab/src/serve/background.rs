@@ -61,6 +61,14 @@ async fn scan_once(ledger: Arc<Mutex<Ledger>>, pricing: Arc<Pricing>) {
                 crate::scan_file(&led, adapter.as_ref(), &pricing, &path, &mut summary);
             }
         }
+        // DB-backed sources: one lock per source, same discipline, so `/api`
+        // requests interleave between sources instead of blocking on the sweep.
+        for db in crate::default_db_adapters() {
+            let Ok(led) = ledger.lock() else {
+                return;
+            };
+            crate::scan_db_source(&led, db.as_ref(), &pricing, &mut summary);
+        }
     })
     .await;
 }

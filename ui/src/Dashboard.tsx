@@ -7,6 +7,7 @@ import { RecapStrip } from "@/components/recap/RecapStrip";
 import { KpiTiles, type HeroMetric } from "@/components/recap/KpiTiles";
 import { HeroSection } from "@/components/sections/HeroSection";
 import { ModelsPanel } from "@/components/sections/ModelsPanel";
+import { AgentsPanel } from "@/components/sections/AgentsPanel";
 import { SavingsPanel } from "@/components/sections/SavingsPanel";
 import { ProjectsPanel } from "@/components/sections/ProjectsPanel";
 import { PlanPanel } from "@/components/sections/PlanPanel";
@@ -27,6 +28,7 @@ export default function Dashboard() {
   const planQ = useAsync(() => api.planWindow(filters), [filterKey]);
   const syncQ = useAsync(() => api.syncStatus(), []);
   const optionsQ = useAsync(() => api.projects({}), []);
+  const agentOptionsQ = useAsync(() => api.agents({}), []);
 
   const [metric, setMetric] = useState<HeroMetric>("tokens");
   const [grouped, setGrouped] = useState(false);
@@ -57,6 +59,11 @@ export default function Dashboard() {
     [optionsQ.data],
   );
 
+  const agentOptions = useMemo(
+    () => agentOptionsQ.data?.map((a) => a.agent) ?? [],
+    [agentOptionsQ.data],
+  );
+
   const setOverlay = useCallback((patch: Partial<OverlayState>) => {
     if (patch.bannerVisible === false) {
       setBannerDismissed(true);
@@ -81,6 +88,13 @@ export default function Dashboard() {
     [controller, filters.project],
   );
 
+  const onSelectAgent = useCallback(
+    (agent: string) => {
+      controller.setFilter("agent", filters.agent === agent ? undefined : agent);
+    },
+    [controller, filters.agent],
+  );
+
   const bannerVisible = !!sync && !sync.enabled && !bannerDismissed;
 
   return (
@@ -89,6 +103,7 @@ export default function Dashboard() {
         controller={controller}
         projectOptions={projectOptions}
         machines={sync?.machines ?? []}
+        agentOptions={agentOptions}
         summary={summaryQ.data}
         planWindow={planQ.data}
         sync={sync}
@@ -103,8 +118,14 @@ export default function Dashboard() {
 
         <div className="grid gap-6 lg:grid-cols-2">
           <ModelsPanel filters={filters} />
-          <ProjectsPanel filters={filters} onSelectProject={onSelectProject} />
+          {agentOptions.length > 1
+            ? <AgentsPanel filters={filters} onSelectAgent={onSelectAgent} />
+            : <ProjectsPanel filters={filters} onSelectProject={onSelectProject} />}
         </div>
+
+        {agentOptions.length > 1 && (
+          <ProjectsPanel filters={filters} onSelectProject={onSelectProject} />
+        )}
 
         <SavingsPanel filters={filters} />
 

@@ -32,6 +32,11 @@ export function modelColor(model: string): string {
   return MODEL_PALETTE[hashString(model) % MODEL_PALETTE.length];
 }
 
+export function agentColor(agent: string): string {
+  if (!agent || agent === "unknown") return MUTED;
+  return MODEL_PALETTE[hashString(agent) % MODEL_PALETTE.length];
+}
+
 // The five token kinds shown in cache-split tooltips and the cache hero view.
 export const TOKEN_KIND_COLORS = {
   input: "#207bff",

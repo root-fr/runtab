@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::Ledger;
@@ -187,10 +187,37 @@ impl Ledger {
         Ok(())
     }
 
-    /// Idempotently store a pulled row from another machine. The `event_id`
-    /// UNIQUE constraint drops re-pulled duplicates.
+    /// Store a pulled row from another machine, keep-higher on the `event_id`
+    /// key: a re-pull with strictly higher token totals replaces the stale row
+    /// (the server re-sequences a grown row so it re-pulls with a fresh
+    /// `server_seq`), a lower re-pull is ignored, and a first sighting inserts.
+    /// This mirrors the local keep-higher upsert so a cumulative source's growth
+    /// propagates across machines instead of freezing at its first snapshot.
     pub fn upsert_remote(&self, p: &PulledRecord) -> rusqlite::Result<()> {
         let r = &p.record;
+        let new_total = (r.input_tokens
+            + r.output_tokens
+            + r.cache_read_tokens
+            + r.cache_creation_tokens
+            + r.reasoning_tokens) as i64;
+        let existing: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT input_tokens + output_tokens + cache_read_tokens
+                        + cache_creation_tokens + reasoning_tokens
+                 FROM remote_events WHERE event_id = ?1",
+                params![r.event_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match existing {
+            Some(old_total) if new_total <= old_total => return Ok(()),
+            Some(_) => {
+                self.conn
+                    .execute("DELETE FROM remote_events WHERE event_id = ?1", params![r.event_id])?;
+            }
+            None => {}
+        }
         self.conn.execute(
             "INSERT OR IGNORE INTO remote_events
                 (server_seq, event_id, ts, agent, model, project_label, session_id,

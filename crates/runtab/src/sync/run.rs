@@ -25,7 +25,8 @@ pub fn run_once(ledger: Ledger, pricing: &Pricing, verbose: bool) -> anyhow::Res
     }
 
     let adapters = crate::default_adapters();
-    let mut summary = crate::scan(&ledger, &adapters, pricing);
+    let db_adapters = crate::default_db_adapters();
+    let mut summary = crate::scan_all(&ledger, &adapters, &db_adapters, pricing);
     summary.rtk = crate::scan_rtk(&ledger);
 
     let s = ledger.sync_state()?;

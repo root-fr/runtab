@@ -7,6 +7,7 @@ use crate::ledger::{Filter, HeatmapCell, MachineStat};
 pub struct FilterParams {
     pub project: Option<String>,
     pub machine: Option<String>,
+    pub agent: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
 }
@@ -16,6 +17,7 @@ impl FilterParams {
         Filter {
             project: clean(self.project),
             machine: clean(self.machine),
+            agent: agent_source(self.agent),
             from: clean(self.from),
             to: clean(self.to),
         }
@@ -42,6 +44,7 @@ impl ToolsParams {
 pub struct SessionParams {
     pub project: Option<String>,
     pub machine: Option<String>,
+    pub agent: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
     pub page: Option<u32>,
@@ -53,6 +56,7 @@ impl SessionParams {
         Filter {
             project: clean(self.project.clone()),
             machine: clean(self.machine.clone()),
+            agent: agent_source(self.agent.clone()),
             from: clean(self.from.clone()),
             to: clean(self.to.clone()),
         }
@@ -81,4 +85,10 @@ pub struct SyncStatus {
 
 fn clean(v: Option<String>) -> Option<String> {
     v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// Fold the hyphenated wire agent id (`claude-code`) to the local `source`
+/// column form (`claude_code`) once at the DTO boundary.
+fn agent_source(v: Option<String>) -> Option<String> {
+    clean(v).map(|s| s.replace('-', "_"))
 }

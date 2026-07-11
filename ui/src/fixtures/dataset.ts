@@ -7,6 +7,7 @@ import type { CostBasis } from "@/api/types";
 
 export interface Bucket {
   date: string;
+  agent: string;
   model: string;
   project_label: string;
   machine_id: string;
@@ -32,6 +33,13 @@ export const MACHINES: Machine[] = [
 
 const MODELS = ["claude-opus-4", "claude-sonnet-4", "claude-haiku-3.5"];
 const PROJECTS = ["tkm", "ledger-web", "infra-scripts", "notes-cli"];
+
+// Hyphenated agent ids, weighted so the mix reads as a mostly-Claude user who
+// occasionally reaches for Codex or opencode.
+const AGENTS = [
+  "claude-code", "claude-code", "claude-code", "claude-code",
+  "codex", "codex", "opencode",
+];
 
 // micro-USD per 1M tokens, blended input/output. Coarse, for shape not billing.
 const MODEL_RATE: Record<string, number> = {
@@ -68,6 +76,7 @@ export function deletionHorizon(): string {
 function buildBucket(
   rand: () => number,
   date: string,
+  agent: string,
   model: string,
   project: string,
   machine: Machine,
@@ -82,6 +91,7 @@ function buildBucket(
   const est_cost_microusd = Math.floor((billable / 1e6) * MODEL_RATE[model]);
   return {
     date,
+    agent,
     model,
     project_label: project,
     machine_id: machine.id,
@@ -120,9 +130,10 @@ function generate(): Bucket[] {
       for (const project of activeProjects) {
         if (rand() < 0.45) continue;
         const model = MODELS[Math.floor(rand() * MODELS.length)];
+        const agent = AGENTS[Math.floor(rand() * AGENTS.length)];
         const weight = dayWeight(rand, dayIndex, weekday);
         if (weight <= 0) continue;
-        out.push(buildBucket(rand, date, model, project, machine, weight));
+        out.push(buildBucket(rand, date, agent, model, project, machine, weight));
       }
     }
   }

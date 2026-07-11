@@ -13,6 +13,7 @@ pub fn router(state: AppState) -> Router {
         .route("/daily", get(api::daily))
         .route("/models", get(api::models))
         .route("/projects", get(api::projects))
+        .route("/agents", get(api::agents))
         .route("/sessions", get(api::sessions))
         .route("/tools", get(api_tools::tools))
         .route("/savings", get(api_savings::savings))

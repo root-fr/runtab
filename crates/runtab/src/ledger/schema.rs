@@ -199,6 +199,9 @@ pub fn create(conn: &Connection) -> rusqlite::Result<()> {
     if version < 3 {
         migrate_v3(conn)?;
     }
+    if version < 4 {
+        migrate_v4(conn)?;
+    }
     Ok(())
 }
 
@@ -238,6 +241,57 @@ fn migrate_v3(conn: &Connection) -> rusqlite::Result<()> {
     let mut ddl = String::from("BEGIN;\n");
     ddl.push_str(MIGRATE_V3_TABLES);
     ddl.push_str("PRAGMA user_version = 3;\nCOMMIT;\n");
+    conn.execute_batch(&ddl)
+}
+
+// v4: (1) per-source cursor state for DB-backed adapters — generalizes the
+// rtk_scan_state singleton to N sources; (2) a `dirty` re-push flag on
+// usage_events so keep-higher growth survives sync (the append-only id cursor
+// never re-pushes an updated row); (3) merged_events recreated with a trailing
+// `source` column so the plan-window pin can filter to claude_code. The
+// remote_events arm stores the wire (hyphen) agent form; REPLACE folds it back
+// to the local underscore form so the column is uniform across both arms.
+const MIGRATE_V4_TABLES: &str = "
+CREATE TABLE IF NOT EXISTS source_cursors (
+    source     TEXT    PRIMARY KEY,
+    db_path    TEXT    NOT NULL,
+    cursor     TEXT    NOT NULL DEFAULT '',
+    row_count  INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_events_dirty
+    ON usage_events(dirty) WHERE dirty = 1;
+
+DROP VIEW IF EXISTS merged_events;
+CREATE VIEW merged_events AS
+    SELECT
+        ts, model, project_label, session_id, machine_id, machine_name,
+        input_tokens, output_tokens, cache_read_tokens,
+        cache_creation_tokens, reasoning_tokens,
+        CASE WHEN cost_usd IS NULL THEN NULL
+             ELSE CAST(ROUND(cost_usd * 1000000) AS INTEGER) END AS est_cost_microusd,
+        cost_basis,
+        CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END AS unpriced,
+        source
+    FROM usage_events
+    UNION ALL
+    SELECT
+        ts, model, project_label, session_id, machine_id, machine_name,
+        input_tokens, output_tokens, cache_read_tokens,
+        cache_creation_tokens, reasoning_tokens,
+        est_cost_microusd, cost_basis, 0 AS unpriced,
+        REPLACE(agent, '-', '_') AS source
+    FROM remote_events;
+";
+
+fn migrate_v4(conn: &Connection) -> rusqlite::Result<()> {
+    let mut ddl = String::from("BEGIN;\n");
+    if !column_exists(conn, "usage_events", "dirty")? {
+        ddl.push_str("ALTER TABLE usage_events ADD COLUMN dirty INTEGER NOT NULL DEFAULT 0;\n");
+    }
+    ddl.push_str(MIGRATE_V4_TABLES);
+    ddl.push_str("PRAGMA user_version = 4;\nCOMMIT;\n");
     conn.execute_batch(&ddl)
 }
 

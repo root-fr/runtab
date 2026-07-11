@@ -6,9 +6,9 @@
 // runs with no server and the fixtures code is dropped from a normal build.
 
 import type {
-  DailyResponse, Filters, HeatmapResponse, ModelsResponse, PlanWindowResponse,
-  PreviewRecordResponse, ProjectsResponse, ReviewProject, ReviewState,
-  SavingsResponse, SessionsResponse, Settings, Summary, SyncStatus,
+  AgentShare, DailyResponse, Filters, HeatmapResponse, ModelsResponse,
+  PlanWindowResponse, PreviewRecordResponse, ProjectsResponse, ReviewProject,
+  ReviewState, SavingsResponse, SessionsResponse, Settings, Summary, SyncStatus,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -75,13 +75,17 @@ async function postJson<Req, Res>(path: string, body: Req): Promise<Res> {
 }
 
 function filterParams(filters: Filters): Record<string, string | undefined> {
-  return { project: filters.project, machine: filters.machine, from: filters.from, to: filters.to };
+  return {
+    project: filters.project, machine: filters.machine, agent: filters.agent,
+    from: filters.from, to: filters.to,
+  };
 }
 
 export interface DashboardApi {
   summary(filters?: Filters): Promise<Summary>;
   daily(filters?: Filters): Promise<DailyResponse>;
   models(filters?: Filters): Promise<ModelsResponse>;
+  agents(filters?: Filters): Promise<AgentShare[]>;
   projects(filters?: Filters): Promise<ProjectsResponse>;
   savings(filters?: Filters): Promise<SavingsResponse>;
   sessions(filters?: Filters, page?: number, pageSize?: number): Promise<SessionsResponse>;
@@ -99,6 +103,8 @@ const httpApi: DashboardApi = {
   summary: (f = {}) => getJson<Summary>("/api/summary", filterParams(f)),
   daily: (f = {}) => getJson<DailyResponse>("/api/daily", filterParams(f)),
   models: (f = {}) => getJson<ModelsResponse>("/api/models", filterParams(f)),
+  agents: (f = {}) =>
+    getJson<{ agents: AgentShare[] }>("/api/agents", filterParams(f)).then((b) => b.agents),
   projects: (f = {}) => getJson<ProjectsResponse>("/api/projects", filterParams(f)),
   savings: (f = {}) => getJson<SavingsResponse>("/api/savings", filterParams(f)),
   sessions: (f = {}, page = 1, pageSize = 50) =>
@@ -127,6 +133,7 @@ export const api: DashboardApi = {
   summary: (f) => backend().then((b) => b.summary(f)),
   daily: (f) => backend().then((b) => b.daily(f)),
   models: (f) => backend().then((b) => b.models(f)),
+  agents: (f) => backend().then((b) => b.agents(f)),
   projects: (f) => backend().then((b) => b.projects(f)),
   savings: (f) => backend().then((b) => b.savings(f)),
   sessions: (f, page, pageSize) => backend().then((b) => b.sessions(f, page, pageSize)),

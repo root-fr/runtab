@@ -48,6 +48,17 @@ export function formatInt(n: number): string {
   return n.toLocaleString("en-US");
 }
 
+const AGENT_LABELS: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  opencode: "opencode",
+  hermes: "Hermes",
+};
+
+export function agentLabel(agent: string): string {
+  return AGENT_LABELS[agent] ?? agent;
+}
+
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",

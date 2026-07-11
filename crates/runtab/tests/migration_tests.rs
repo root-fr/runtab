@@ -132,6 +132,74 @@ INSERT INTO project_prefs (name, synced_label, excluded) VALUES ('projA', NULL, 
 PRAGMA user_version = 2;
 ";
 
+/// A hand-built v3 database: everything in `V2` plus the v3 tool-event tables,
+/// pinned at `user_version = 3` with the pre-v4 `merged_events` view (no
+/// trailing `source` column) and no `usage_events.dirty` column. Exercises the
+/// v3 -> v4 upgrade path in isolation.
+const V3_TAIL: &str = "
+CREATE TABLE tool_events (
+    id                INTEGER PRIMARY KEY,
+    source            TEXT    NOT NULL,
+    session_id        TEXT    NOT NULL,
+    tool_use_id       TEXT    NOT NULL,
+    ts                TEXT    NOT NULL,
+    project           TEXT    NOT NULL,
+    tool_name         TEXT    NOT NULL,
+    est_args_tokens   INTEGER NOT NULL,
+    est_result_tokens INTEGER NOT NULL,
+    is_error          INTEGER NOT NULL DEFAULT 0,
+    bash_head_hashes  TEXT,
+    bash_chain_hashes TEXT,
+    UNIQUE(source, session_id, tool_use_id)
+);
+CREATE TABLE pending_tool_calls (
+    source            TEXT NOT NULL,
+    session_id        TEXT NOT NULL,
+    tool_use_id       TEXT NOT NULL,
+    ts                TEXT NOT NULL,
+    project           TEXT NOT NULL,
+    tool_name         TEXT NOT NULL,
+    est_args_tokens   INTEGER NOT NULL,
+    bash_head_hashes  TEXT,
+    bash_chain_hashes TEXT,
+    PRIMARY KEY (source, session_id, tool_use_id)
+);
+CREATE TABLE rtk_events (
+    id              INTEGER PRIMARY KEY,
+    rtk_row_id      INTEGER NOT NULL UNIQUE,
+    ts              TEXT    NOT NULL,
+    project_path    TEXT    NOT NULL,
+    head_hash       TEXT    NOT NULL,
+    cmd_hash        TEXT    NOT NULL,
+    raw_tokens      INTEGER NOT NULL,
+    filtered_tokens INTEGER NOT NULL,
+    saved_tokens    INTEGER NOT NULL,
+    exec_time_ms    INTEGER NOT NULL,
+    source          TEXT,
+    session_id      TEXT,
+    tool_event_id   INTEGER,
+    match_kind      TEXT    NOT NULL DEFAULT 'none'
+);
+CREATE TABLE rtk_scan_state (
+    id                      INTEGER PRIMARY KEY CHECK (id = 1),
+    db_path                 TEXT NOT NULL,
+    last_row_id             INTEGER NOT NULL DEFAULT 0,
+    last_attributed_rtk_id  INTEGER NOT NULL DEFAULT 0
+);
+PRAGMA user_version = 3;
+";
+
+fn column_exists(conn: &rusqlite::Connection, table: &str, column: &str) -> bool {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})")).unwrap();
+    let mut rows = stmt.query([]).unwrap();
+    while let Some(row) = rows.next().unwrap() {
+        if row.get::<_, String>(1).unwrap() == column {
+            return true;
+        }
+    }
+    false
+}
+
 const TOOL_EVENT_TABLES: [&str; 4] =
     ["tool_events", "pending_tool_calls", "rtk_events", "rtk_scan_state"];
 
@@ -215,7 +283,7 @@ fn fresh_database_reaches_v3_with_tool_event_tables() {
 
     let conn = rusqlite::Connection::open(&path).unwrap();
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     for table in TOOL_EVENT_TABLES {
         assert!(table_exists(&conn, table), "missing table {table}");
@@ -247,7 +315,7 @@ fn v2_database_upgrades_to_v3_losslessly() {
 
     let conn = rusqlite::Connection::open(&path).unwrap();
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     for table in TOOL_EVENT_TABLES {
         assert!(table_exists(&conn, table), "missing table {table}");
     }
@@ -269,7 +337,103 @@ fn torn_v3_replay_does_not_error() {
 
     let conn = rusqlite::Connection::open(&path).unwrap();
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn fresh_database_reaches_v4_with_source_cursors_and_dirty() {
+    let path = temp_db();
+    drop(Ledger::open(&path).unwrap());
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(version, 4);
+
+    assert!(table_exists(&conn, "source_cursors"), "missing source_cursors");
+    assert!(
+        column_exists(&conn, "usage_events", "dirty"),
+        "missing usage_events.dirty"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn merged_events_exposes_source_and_folds_remote_agent() {
+    // The v4 view gains a trailing `source` column: raw on the local arm, and
+    // the wire hyphen form folded back to the local underscore form on the
+    // remote arm.
+    let path = temp_db();
+    drop(Ledger::open(&path).unwrap());
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute(
+        "INSERT INTO remote_events
+            (server_seq, event_id, ts, agent, model, project_label, session_id,
+             machine_id, machine_name, input_tokens, output_tokens, cache_read_tokens,
+             cache_creation_tokens, reasoning_tokens, est_cost_microusd, cost_basis)
+         VALUES (1,'e1','2026-07-01T10:00:00Z','claude-code','m','p','s','mid','mn',
+                 10,0,0,0,0,0,'estimated')",
+        [],
+    )
+    .unwrap();
+    let mut stmt = conn.prepare("SELECT source FROM merged_events").unwrap();
+    let sources: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert!(
+        sources.contains(&"claude_code".to_string()),
+        "remote agent must fold to claude_code, got {sources:?}"
+    );
+    drop(stmt);
+    drop(conn);
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn v3_database_upgrades_to_v4_losslessly() {
+    let path = temp_db();
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(V2).unwrap();
+        conn.execute_batch(V3_TAIL).unwrap();
+        let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 3);
+        assert!(!column_exists(&conn, "usage_events", "dirty"));
+    }
+
+    let ledger = Ledger::open(&path).unwrap();
+    // The v2/v3 usage_events row (160 tokens) survives.
+    assert_eq!(ledger.api_summary(&Filter::default()).unwrap().total_tokens, 160);
+    drop(ledger);
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(version, 4);
+    assert!(table_exists(&conn, "source_cursors"));
+    assert!(column_exists(&conn, "usage_events", "dirty"));
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn replayed_v4_migration_is_a_no_op() {
+    let path = temp_db();
+    drop(Ledger::open(&path).unwrap());
+
+    let ledger = Ledger::open(&path).expect("replaying the v4 migration must not error");
+    assert_eq!(ledger.api_summary(&Filter::default()).unwrap().total_tokens, 0);
+    drop(ledger);
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(version, 4);
+    assert!(table_exists(&conn, "source_cursors"));
 
     let _ = std::fs::remove_file(&path);
 }

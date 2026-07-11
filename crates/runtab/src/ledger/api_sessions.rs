@@ -17,12 +17,14 @@ pub struct SessionRow {
     pub started_at: String,
     pub ended_at: String,
     pub model: String,
+    /// The session's agent id in hyphen (wire) form, e.g. `claude-code`.
+    pub agent: String,
     pub event_count: u64,
     pub total_tokens: u64,
     pub est_cost_microusd: u64,
     /// rtk savings attributed to this session, joined by `session_id` alone
-    /// (`merged_events` has no `source` column — see `query.rs`'s
-    /// `SavedJoin::Session` for the two-column version the CLI report uses).
+    /// (the CLI report keys on `(source, session_id)` — see `query.rs`'s
+    /// `SavedJoin::Session` for that two-column version).
     /// `None` for a remote/synced session: its `session_id` is a sha256 hash
     /// (`push_rows.rs`), which never equals a local plain id, so it simply
     /// never matches — as well as for a local session rtk never attributed.
@@ -85,7 +87,8 @@ impl Ledger {
                     COALESCE(SUM(est_cost_microusd),0),
                     COUNT(DISTINCT model), MAX(model),
                     (SELECT SUM(r.saved_tokens) FROM rtk_events r
-                        WHERE r.session_id = merged_events.session_id)
+                        WHERE r.session_id = merged_events.session_id),
+                    REPLACE(MAX(source), '_', '-')
              FROM merged_events{where_sql}
              GROUP BY session_id ORDER BY MIN(ts) DESC
              LIMIT {page_size} OFFSET {offset}",
@@ -106,6 +109,7 @@ impl Ledger {
                     started_at: r.get(3)?,
                     ended_at: r.get(4)?,
                     model: if distinct > 1 { "mixed".to_string() } else { one_model },
+                    agent: r.get(11)?,
                     event_count: u(r.get(5)?),
                     total_tokens: u(r.get(6)?),
                     est_cost_microusd: u(r.get(7)?),
@@ -117,6 +121,10 @@ impl Ledger {
     }
 
     pub fn api_planwindow(&self, f: &Filter) -> rusqlite::Result<PlanWindows> {
+        // The plan gauge is Claude-plan-specific: the agent filter never applies
+        // (the recent_plan_tokens pin already isolates claude_code). Strip it so
+        // a codex/opencode selection can't zero the gauge.
+        let f = &Filter { agent: None, ..f.clone() };
         let (sub_ev, api_ev) = self.mode_counts(f)?;
         let mode = billing::resolve(self.override_mode()?, sub_ev, api_ev);
         if mode == Mode::Api {
@@ -159,6 +167,12 @@ impl Ledger {
     /// enough to cover both windows, so the in-Rust math works on a small set.
     fn recent_plan_tokens(&self, f: &Filter, sub_only: bool) -> rusqlite::Result<Vec<(i64, i64)>> {
         let (mut where_sql, mut p) = f.clause();
+        // Plan gauges track the Claude 5h/weekly limits only. codex/opencode/hermes
+        // all map to Estimated, so without this pin their tokens would count
+        // against the Claude plan — one hermes session alone carries ~22M
+        // cache-read tokens. Unconditional (applies under the Subscription
+        // override too).
+        where_sql.push_str(" AND source = 'claude_code'");
         if sub_only {
             where_sql.push_str(" AND cost_basis='estimated'");
         }

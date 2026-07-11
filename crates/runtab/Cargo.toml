@@ -1,6 +1,6 @@
 [package]
 name = "runtab"
-version = "0.1.2"
+version = "0.1.3"
 edition.workspace = true
 description = "Local-first ledger that turns AI coding-agent logs into a private SQLite token/cost ledger"
 license.workspace = true
@@ -31,6 +31,9 @@ getrandom = "0.2"
 # (containers, slim images). Native keychains on macOS/Windows. Entry access
 # stays synchronous; async-io only drives zbus internally.
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
+# Decode-only: cold-compressed Codex rollouts (`.jsonl.zst`) would be invisible
+# to backfill without it.
+zstd = "0.13"
 rust-embed = { version = "8", optional = true }
 
 [dev-dependencies]
@@ -39,3 +42,4 @@ axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"
+zstd = "0.13"

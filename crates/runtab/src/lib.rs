@@ -21,14 +21,21 @@ use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
 
-use adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter};
+use adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter, DbAdapter, HermesAdapter, OpencodeAdapter};
 use ledger::{Ledger, UpsertResult};
 use pricing::Pricing;
 
-/// The adapter set every scan path (CLI `scan`, cron `sync run`, `serve`'s
+/// The file-adapter set every scan path (CLI `scan`, cron `sync run`, `serve`'s
 /// background loop) runs against.
 pub fn default_adapters() -> Vec<Box<dyn Adapter>> {
     vec![Box::new(ClaudeCodeAdapter::new()), Box::new(CodexAdapter)]
+}
+
+/// The DB-backed adapter set. Kept out of `scan()` so a developer machine's real
+/// opencode/hermes DBs can never contaminate the in-memory ledgers that existing
+/// tests build with `scan()`; the callers pass this in explicitly.
+pub fn default_db_adapters() -> Vec<Box<dyn DbAdapter>> {
+    vec![Box::new(OpencodeAdapter), Box::new(HermesAdapter)]
 }
 
 /// Home directory from `$HOME` (or `%USERPROFILE%`), no external crate.
@@ -108,6 +115,144 @@ pub fn scan_with_progress(
 /// replays.
 pub fn scan(ledger: &Ledger, adapters: &[Box<dyn Adapter>], pricing: &Pricing) -> ScanSummary {
     scan_with_progress(ledger, adapters, pricing, &mut |_, _| {})
+}
+
+/// File adapters + DB adapters in one sweep. `scan()` keeps its exact signature
+/// and behavior, so passing an empty `db_adapters` slice is identical to calling
+/// `scan()` — which is what every existing test relies on.
+pub fn scan_all(
+    ledger: &Ledger,
+    adapters: &[Box<dyn Adapter>],
+    db_adapters: &[Box<dyn DbAdapter>],
+    pricing: &Pricing,
+) -> ScanSummary {
+    scan_all_with_progress(ledger, adapters, db_adapters, pricing, &mut |_, _| {})
+}
+
+/// `scan_all` with the same `(done, total)` progress callback `scan_with_progress`
+/// uses. File adapters report one unit per file; each DB source reports one unit
+/// (they scan a whole database per tick, not a stream of files), and the totals
+/// are summed up front so the bar spans both source kinds in one sweep.
+pub fn scan_all_with_progress(
+    ledger: &Ledger,
+    adapters: &[Box<dyn Adapter>],
+    db_adapters: &[Box<dyn DbAdapter>],
+    pricing: &Pricing,
+    progress: &mut dyn FnMut(u64, u64),
+) -> ScanSummary {
+    let mut file_work: Vec<(usize, PathBuf)> = Vec::new();
+    for (i, adapter) in adapters.iter().enumerate() {
+        for path in adapter.discover() {
+            file_work.push((i, path));
+        }
+    }
+    let total = file_work.len() as u64 + db_adapters.len() as u64;
+    let mut done: u64 = 0;
+    let mut summary = ScanSummary::default();
+    for (i, path) in &file_work {
+        scan_file(ledger, adapters[*i].as_ref(), pricing, path, &mut summary);
+        done += 1;
+        progress(done, total);
+    }
+    for db in db_adapters {
+        scan_db_source(ledger, db.as_ref(), pricing, &mut summary);
+        done += 1;
+        progress(done, total);
+    }
+    let cutoff = timeutil::epoch_to_rfc3339(timeutil::now_epoch() - PENDING_TOOL_CALL_MAX_AGE_SECS);
+    if let Err(e) = ledger.prune_pending(&cutoff) {
+        eprintln!("runtab: cannot prune pending tool calls: {e}");
+    }
+    match ledger.pending_tool_calls_count() {
+        Ok(n) => summary.pending_tool_calls = n,
+        Err(e) => eprintln!("runtab: cannot count pending tool calls: {e}"),
+    }
+    summary
+}
+
+/// Discover-and-scan one DB source. A missing DB silently skips (feature off);
+/// any read error skips the source for this tick, never failing the sweep.
+pub fn scan_db_source(
+    ledger: &Ledger,
+    adapter: &dyn DbAdapter,
+    pricing: &Pricing,
+    summary: &mut ScanSummary,
+) {
+    let Some(path) = adapter.discover() else {
+        return;
+    };
+    scan_db_source_at(ledger, adapter, pricing, &path, summary);
+}
+
+/// Scan a DB source from a known path (the test seam: tests hand the path in
+/// directly, so they never touch process env or a developer's real DBs). Mirrors
+/// `scan_file`'s tx/pricing/upsert discipline: the cursor never advances past a
+/// lost event.
+pub fn scan_db_source_at(
+    ledger: &Ledger,
+    adapter: &dyn DbAdapter,
+    pricing: &Pricing,
+    db_path: &Path,
+    summary: &mut ScanSummary,
+) {
+    let source = adapter.source();
+    let stored = match ledger.source_cursor(source) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("runtab: cannot read cursor for {source}: {e}");
+            None
+        }
+    };
+
+    let fetched = match adapter.fetch(db_path, stored.as_ref()) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("runtab: cannot read {source} db {}: {e:#}", db_path.display());
+            return;
+        }
+    };
+
+    summary.files_scanned += 1;
+    summary.lines_skipped += fetched.rows_skipped;
+
+    let tx = ledger.tx_begin().is_ok();
+    let mut db_error = false;
+    for mut event in fetched.events {
+        pricing.apply(&mut event, &mut summary.unknown_models);
+        match ledger.upsert(&event) {
+            Ok(UpsertResult::Inserted) => summary.events_inserted += 1,
+            Ok(_) => summary.duplicates_dropped += 1,
+            Err(e) => {
+                eprintln!("runtab: db error on {}: {e}", event.message_id);
+                summary.db_errors += 1;
+                db_error = true;
+            }
+        }
+    }
+
+    // A failed upsert must not let the cursor advance past the lost event.
+    if db_error {
+        if tx {
+            let _ = ledger.tx_rollback();
+        }
+        return;
+    }
+    if let Err(e) =
+        ledger.set_source_cursor(source, &db_path.to_string_lossy(), &fetched.new_cursor, fetched.row_count)
+    {
+        eprintln!("runtab: cannot record cursor for {source}: {e}");
+        if tx {
+            let _ = ledger.tx_rollback();
+        }
+        return;
+    }
+    if tx {
+        if let Err(e) = ledger.tx_commit() {
+            eprintln!("runtab: db error committing {source}: {e}");
+            summary.db_errors += 1;
+            let _ = ledger.tx_rollback();
+        }
+    }
 }
 
 /// Runs the rtk import + attribution phase after the adapter scan (see
