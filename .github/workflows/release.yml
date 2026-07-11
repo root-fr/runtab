@@ -27,8 +27,8 @@ jobs:
             runner: windows-2022
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
       - name: Build dashboard UI
@@ -48,7 +48,7 @@ jobs:
           else
             cp target/release/runtab "artifact/${{ matrix.target }}/"
           fi
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: artifact/${{ matrix.target }}
@@ -58,8 +58,8 @@ jobs:
     needs: build
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -71,7 +71,7 @@ jobs:
             echo "tag v$TAG_VERSION does not match crate version $CRATE_VERSION" >&2
             exit 1
           fi
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Assemble npm packages
